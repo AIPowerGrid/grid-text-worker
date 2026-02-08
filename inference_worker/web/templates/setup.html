@@ -126,6 +126,25 @@
         <div class="field-hint" x-show="pull_error" style="color: var(--red); margin-top: 0.3rem;" x-text="pull_error"></div>
         <div class="field-hint" x-show="pull_ok" style="color: var(--green); margin-top: 0.3rem;">Model pulled!</div>
       </div>
+
+      <!-- Context Length -->
+      <label class="field" x-show="config.model_name" style="margin-bottom: 0;">
+        <span class="field-label">Context Length</span>
+        <div style="position: relative;">
+          <input type="number" x-model="config.max_context_length" placeholder="4096" min="256" max="131072">
+          <span x-show="detecting_context" class="spinner-sm" style="position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%);"></span>
+        </div>
+        <div x-show="detected_context_length" x-transition
+             style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
+          <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;"></span>
+          <span style="font-size: 0.78rem; color: var(--green);">
+            Detected <span x-text="Number(detected_context_length).toLocaleString()"></span> from backend
+          </span>
+        </div>
+        <div class="field-hint" x-show="context_fetch_done && !detected_context_length">
+          Could not auto-detect &mdash; enter manually
+        </div>
+      </label>
     </div>
 
     <!-- No backend: two options -->
@@ -204,22 +223,6 @@
                style="flex: 1; accent-color: var(--accent);">
         <span style="min-width: 3.5rem; text-align: right; font-size: 0.85rem; font-family: monospace; color: var(--text);"
               x-text="config.max_length"></span>
-      </div>
-    </label>
-
-    <label class="field">
-      <span class="field-label">Max Context Length <span class="optional">(tokens)</span></span>
-      <div style="position: relative;">
-        <input type="number" x-model="config.max_context_length" placeholder="4096" min="256" max="131072">
-        <span x-show="detecting_context" class="spinner-sm" style="position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%);"></span>
-      </div>
-      <div x-show="detected_context_length" x-transition
-           style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
-        <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;"></span>
-        <span style="font-size: 0.78rem; color: var(--green);">
-          Detected <span x-text="Number(detected_context_length).toLocaleString()"></span> from backend
-        </span>
-        <span style="font-size: 0.72rem; color: var(--text-dim); margin-left: 0.25rem;">&mdash; override above if needed</span>
       </div>
     </label>
 
@@ -365,6 +368,7 @@ function setupWizard() {
     wallet_hint: '',
     detected_context_length: null,
     detecting_context: false,
+    context_fetch_done: false,
 
     async init() {
       await this.runDetect();
@@ -408,6 +412,7 @@ function setupWizard() {
       if (!this.config.backend_url || !this.config.model_name) return;
       this.detected_context_length = null;
       this.detecting_context = true;
+      this.context_fetch_done = false;
       try {
         const r = await fetch('/api/setup/context-length', {
           method: 'POST',
@@ -424,7 +429,10 @@ function setupWizard() {
           this.config.max_context_length = String(d.context_length);
         }
       } catch (e) { /* silent fallback to manual */ }
-      finally { this.detecting_context = false; }
+      finally {
+        this.detecting_context = false;
+        this.context_fetch_done = true;
+      }
     },
 
     selectBackend(i) {
