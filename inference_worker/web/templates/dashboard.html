@@ -4,68 +4,170 @@
 
 {% block content %}
 <div x-data="dashboard()" x-init="poll()">
-  <div class="page-header">
-    <h1>Dashboard</h1>
-  </div>
 
-  <div class="status-grid">
-    <div class="card">
-      <h3>Worker</h3>
+  <!-- Hero: Worker status -->
+  <div class="dash-hero">
+    <div class="dash-hero-left">
       <div class="status-indicator" :class="status.worker_running ? 'online' : 'offline'">
-        <span x-text="status.worker_running ? 'Running' : 'Stopped'"></span>
+        <span x-text="status.worker_running ? (status.config?.worker_name || 'Online') : 'Offline'"></span>
       </div>
+      <p class="dash-model" x-show="status.config?.model_name">
+        <span x-text="status.config?.grid_model_name || status.config?.model_name"></span>
+      </p>
       <template x-if="status.worker_error">
         <p class="error" x-text="status.worker_error"></p>
       </template>
     </div>
-
-    <div class="card">
-      <h3>Worker Name</h3>
-      <p x-text="status.config?.worker_name || '—'"></p>
-    </div>
-
-    <div class="card">
-      <h3>Backend</h3>
-      <p x-text="(status.config?.backend_type || '—').charAt(0).toUpperCase() + (status.config?.backend_type || '').slice(1)"></p>
-      <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 0.2rem;" x-text="status.config?.ollama_url || ''"></p>
-    </div>
-
-    <div class="card">
-      <h3>Model</h3>
-      <p x-text="status.config?.model_name || 'None'"></p>
-      <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.15rem;" x-show="status.config?.grid_model_name" x-text="'Grid: ' + (status.config?.grid_model_name || '')"></p>
-    </div>
-
-    <div class="card">
-      <h3>Threads</h3>
-      <p x-text="status.config?.max_threads || '—'"></p>
-    </div>
-
-    <div class="card">
-      <h3>Max Tokens</h3>
-      <p x-text="status.config?.max_length || '—'"></p>
-    </div>
-
-    <div class="card">
-      <h3>Wallet</h3>
-      <template x-if="status.config?.wallet_address">
-        <span class="wallet-addr-mini">
-          <span class="dot"></span>
-          <span x-text="(status.config?.wallet_address || '').slice(0,6) + '...' + (status.config?.wallet_address || '').slice(-4)"></span>
-        </span>
-      </template>
-      <template x-if="!status.config?.wallet_address">
-        <p style="color: var(--text-dim);">Not set</p>
-      </template>
+    <div class="dash-hero-right">
+      <button class="btn btn-outline btn-sm" @click="restart()" :disabled="restarting">
+        <span x-show="!restarting">Restart</span>
+        <span x-show="restarting"><span class="spinner-sm"></span></span>
+      </button>
     </div>
   </div>
 
-  <div style="margin-top: 1.25rem; text-align: center;">
-    <button class="btn btn-outline btn-sm" @click="restart()" :disabled="restarting">
-      <span x-show="!restarting">Restart Worker</span>
-      <span x-show="restarting"><span class="spinner-sm"></span> Restarting...</span>
-    </button>
+  <!-- Live session stats (from worker memory) -->
+  <div class="stats-row" x-show="status.session_stats">
+    <div class="stat-card accent">
+      <div class="stat-value" x-text="formatNum(status.session_stats?.kudos_per_hour)"></div>
+      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">電/hr</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" x-text="status.session_stats?.jobs_completed ?? '—'"></div>
+      <div class="stat-label">Jobs (session)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" x-text="formatNum(status.session_stats?.jobs_per_hour)"></div>
+      <div class="stat-label">Jobs/hr</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" x-text="formatUptime(status.session_stats?.uptime_seconds)"></div>
+      <div class="stat-label">Session</div>
+    </div>
   </div>
+
+  <!-- Lifetime stats from Grid API -->
+  <div class="stats-row" x-show="grid.worker">
+    <div class="stat-card">
+      <div class="stat-value" x-text="formatNum(grid.worker?.kudos_rewards)"></div>
+      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">電 Lifetime</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" x-text="grid.worker?.requests_fulfilled ?? '—'"></div>
+      <div class="stat-label">Jobs Lifetime</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" x-text="formatPerf(grid.worker?.performance)"></div>
+      <div class="stat-label">Performance</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" x-text="formatUptime(grid.worker?.uptime)"></div>
+      <div class="stat-label">Uptime</div>
+    </div>
+  </div>
+
+  <!-- Config + Grid side by side -->
+  <div class="dash-columns">
+    <!-- Worker config -->
+    <div class="card">
+      <h3>Worker Config</h3>
+      <div class="config-grid">
+        <div class="config-item">
+          <span class="config-label">Name</span>
+          <span class="config-value" x-text="status.config?.worker_name || '—'"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Backend</span>
+          <span class="config-value" x-text="(status.config?.backend_type || '—')"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Model</span>
+          <span class="config-value" x-text="status.config?.model_name || '—'"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Context</span>
+          <span class="config-value" x-text="(status.config?.max_context_length || '—') + ' tokens'"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Max Length</span>
+          <span class="config-value" x-text="(status.config?.max_length || '—') + ' tokens'"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Threads</span>
+          <span class="config-value" x-text="status.config?.max_threads || '—'"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Wallet</span>
+          <span class="config-value">
+            <template x-if="status.config?.wallet_address">
+              <span class="wallet-addr-mini">
+                <span class="dot"></span>
+                <span x-text="(status.config?.wallet_address || '').slice(0,6) + '...' + (status.config?.wallet_address || '').slice(-4)"></span>
+              </span>
+            </template>
+            <template x-if="!status.config?.wallet_address">
+              <span style="color: var(--text-dim);">Not set</span>
+            </template>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grid network stats -->
+    <div class="card">
+      <h3>Network</h3>
+      <div class="config-grid">
+        <div class="config-item">
+          <span class="config-label">Text Workers</span>
+          <span class="config-value" x-text="grid.performance?.text_worker_count ?? '—'"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Queued Requests</span>
+          <span class="config-value" x-text="grid.performance?.queued_text_requests ?? '—'"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Tokens/min</span>
+          <span class="config-value" x-text="formatNum(grid.performance?.past_minute_tokens)"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Total Requests</span>
+          <span class="config-value" x-text="formatNum(grid.text_stats?.total?.requests)"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Total Tokens</span>
+          <span class="config-value" x-text="formatNum(grid.text_stats?.total?.tokens)"></span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">Today</span>
+          <span class="config-value" x-text="(grid.text_stats?.day?.requests ?? '—') + ' reqs'"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User info -->
+  <div class="card" x-show="grid.user" style="margin-top: 0.75rem;">
+    <h3>Your Account</h3>
+    <div class="config-grid">
+      <div class="config-item">
+        <span class="config-label">Username</span>
+        <span class="config-value" x-text="grid.user?.username || '—'"></span>
+      </div>
+      <div class="config-item">
+        <span class="config-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">電</span></span>
+        <span class="config-value" x-text="formatNum(grid.user?.kudos)"></span>
+      </div>
+      <div class="config-item">
+        <span class="config-label">Workers</span>
+        <span class="config-value" x-text="grid.user?.worker_count ?? '—'"></span>
+      </div>
+      <div class="config-item">
+        <span class="config-label">Trusted</span>
+        <span class="config-value" x-text="grid.user?.trusted ? 'Yes' : 'No'"></span>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -76,17 +178,53 @@ function dashboard() {
       worker_error: {{ ('\"' + worker_error + '\"') if worker_error else 'null' }},
       config: null,
     },
+    grid: { user: null, worker: null, performance: null, text_stats: null },
     restarting: false,
+
+    formatNum(n) {
+      if (n == null) return '—';
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return String(n);
+    },
+
+    formatPerf(s) {
+      if (!s) return '—';
+      const m = s.match(/([\d.]+)\s*tokens?\s*per\s*second/i);
+      if (m) return Math.round(parseFloat(m[1])) + ' t/s';
+      const m2 = s.match(/([\d.]+)\s*megapixelsteps?\s*per\s*second/i);
+      if (m2) return parseFloat(m2[1]).toFixed(1) + ' mp/s';
+      return s;
+    },
+
+    formatUptime(seconds) {
+      if (!seconds) return '—';
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      if (d > 0) return d + 'd ' + h + 'h';
+      const m = Math.floor((seconds % 3600) / 60);
+      if (h > 0) return h + 'h ' + m + 'm';
+      return m + 'm';
+    },
+
     async poll() {
-      const update = async () => {
+      const updateLocal = async () => {
         try {
           const r = await fetch('/api/status');
           this.status = await r.json();
-        } catch (e) { /* ignore */ }
+        } catch (e) {}
       };
-      await update();
-      setInterval(update, 5000);
+      const updateGrid = async () => {
+        try {
+          const r = await fetch('/api/grid-stats');
+          this.grid = await r.json();
+        } catch (e) {}
+      };
+      await Promise.all([updateLocal(), updateGrid()]);
+      setInterval(updateLocal, 5000);
+      setInterval(updateGrid, 30000);
     },
+
     async restart() {
       this.restarting = true;
       try {

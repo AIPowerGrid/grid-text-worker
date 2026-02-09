@@ -10,7 +10,7 @@ class Settings:
     GRID_API_URL = os.getenv("GRID_API_URL", "https://api.aipowergrid.io/api")
     NSFW = os.getenv("GRID_NSFW", "true").lower() == "true"
     MAX_THREADS = int(os.getenv("GRID_MAX_THREADS", "1"))
-    MAX_LENGTH = int(os.getenv("GRID_MAX_LENGTH", "512"))
+    MAX_LENGTH = int(os.getenv("GRID_MAX_LENGTH", "4096"))
     MAX_CONTEXT_LENGTH = int(os.getenv("GRID_MAX_CONTEXT_LENGTH", "4096"))
 
     # Backend type: "ollama" (easy mode) or "openai" (advanced/custom)

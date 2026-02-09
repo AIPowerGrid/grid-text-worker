@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,6 +12,28 @@ from ..config import Settings
 from ..worker import TextWorker
 
 logger = logging.getLogger(__name__)
+
+# Ring buffer for log lines (last 500)
+log_buffer = deque(maxlen=500)
+
+
+class BufferHandler(logging.Handler):
+    # Skip noisy log lines from the buffer
+    _SKIP = ("HTTP Request:", "GET /api/", "POST /api/", "GET /static/")
+
+    def emit(self, record):
+        msg = self.format(record)
+        if any(s in msg for s in self._SKIP):
+            return
+        log_buffer.append(msg)
+
+
+def setup_log_capture():
+    """Attach a buffer handler to the root logger to capture worker output."""
+    handler = BufferHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(handler)
+
 
 WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = WEB_DIR / "templates"
@@ -70,6 +93,7 @@ async def stop_worker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_log_capture()
     if _is_configured():
         logger.info("Config found — starting worker.")
         worker_state["setup_complete"] = True

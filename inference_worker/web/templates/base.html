@@ -15,11 +15,12 @@
   {% block nav %}
   <nav>
     <div class="nav-brand">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      <img src="/static/logo.png" alt="AIPG" style="width: 24px; height: 24px; border-radius: 6px;">
       Grid Inference Worker
     </div>
     <div class="nav-links">
       <a href="/" class="{% block nav_dashboard %}{% endblock %}">Dashboard</a>
+      <a href="/logs" class="{% block nav_logs %}{% endblock %}">Logs</a>
       <a href="/settings" class="{% block nav_settings %}{% endblock %}">Settings</a>
     </div>
   </nav>

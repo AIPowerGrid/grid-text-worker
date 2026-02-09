@@ -6,7 +6,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..config import Settings
-from ..ollama_detect import (
+from ..detect_backends import (
     detect_backends,
     check_backend_url,
     list_models_for_backend,
@@ -15,7 +15,7 @@ from ..ollama_detect import (
     pull_ollama_model,
     get_platform,
 )
-from .app import app, templates, worker_state, start_worker, stop_worker
+from .app import app, templates, worker_state, log_buffer, start_worker, stop_worker
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,44 @@ async def api_pull_model(request: Request):
     return result
 
 
+@app.post("/api/setup/test-model")
+async def api_test_model(request: Request):
+    """Send a greeting to the model and return its response."""
+    body = await request.json()
+    url = body.get("url", Settings.OLLAMA_URL).rstrip("/")
+    engine = body.get("engine", "ollama")
+    model = body.get("model", "")
+
+    prompt = (
+        "You're an AI model being configured for a decentralized network. "
+        "Sign of life."
+    )
+
+    # Use OpenAI-compatible chat completions (works with Ollama too)
+    chat_url = f"{url}/v1/chat/completions"
+    if engine == "ollama":
+        chat_url = f"{url}/v1/chat/completions"
+    elif not url.endswith("/v1"):
+        chat_url = f"{url}/v1/chat/completions"
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(chat_url, json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 40,
+                "temperature": 0.8,
+            })
+            if resp.status_code == 200:
+                data = resp.json()
+                reply = data["choices"][0]["message"]["content"].strip()
+                return {"ok": True, "reply": reply, "prompt": prompt}
+            return {"ok": False, "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.post("/api/setup/context-length")
 async def api_context_length(request: Request):
     """Detect model context length from the backend."""
@@ -165,9 +203,16 @@ async def dashboard(request: Request):
 
 @app.get("/api/status")
 async def api_status():
+    # Grab live session stats from the worker if running
+    session_stats = None
+    worker = worker_state.get("worker")
+    if worker and hasattr(worker, "stats"):
+        session_stats = worker.stats.to_dict()
+
     return {
         "worker_running": worker_state["running"],
         "worker_error": worker_state.get("error"),
+        "session_stats": session_stats,
         "config": {
             "has_api_key": bool(Settings.GRID_API_KEY),
             "worker_name": Settings.GRID_WORKER_NAME,
@@ -182,6 +227,19 @@ async def api_status():
             "wallet_address": Settings.WALLET_ADDRESS,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+@app.get("/logs", response_class=HTMLResponse)
+async def logs_page(request: Request):
+    return templates.TemplateResponse("logs.html", {"request": request})
+
+
+@app.get("/api/logs")
+async def api_logs():
+    return {"lines": list(log_buffer)}
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +293,59 @@ async def restart_worker():
     await stop_worker()
     await start_worker()
     return {"ok": True}
+
+
+@app.get("/api/grid-stats")
+async def api_grid_stats():
+    """Fetch worker + grid stats from the AIPG API."""
+    import httpx
+    api = Settings.GRID_API_URL.rstrip("/")
+    headers = {"apikey": Settings.GRID_API_KEY} if Settings.GRID_API_KEY else {}
+    result = {"user": None, "worker": None, "performance": None, "text_stats": None}
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        # Find user (kudos, worker list)
+        try:
+            r = await client.get(f"{api}/v2/find_user", headers=headers)
+            if r.status_code == 200:
+                result["user"] = r.json()
+        except Exception:
+            pass
+
+        # Grid performance
+        try:
+            r = await client.get(f"{api}/v2/status/performance")
+            if r.status_code == 200:
+                result["performance"] = r.json()
+        except Exception:
+            pass
+
+        # Text stats
+        try:
+            r = await client.get(f"{api}/v2/stats/text/totals")
+            if r.status_code == 200:
+                result["text_stats"] = r.json()
+        except Exception:
+            pass
+
+        # Find our worker by name
+        if Settings.GRID_WORKER_NAME:
+            try:
+                r = await client.get(
+                    f"{api}/v2/workers",
+                    headers=headers,
+                )
+                if r.status_code == 200:
+                    workers = r.json()
+                    for w in workers:
+                        if Settings.GRID_WORKER_NAME and \
+                           w.get("name", "").startswith(Settings.GRID_WORKER_NAME):
+                            result["worker"] = w
+                            break
+            except Exception:
+                pass
+
+    return result
 
 
 # ---------------------------------------------------------------------------

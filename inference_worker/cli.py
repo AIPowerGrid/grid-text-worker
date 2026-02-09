@@ -6,6 +6,11 @@ def main():
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
+    # Silence noisy loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
     logger = logging.getLogger(__name__)
 
     import uvicorn
@@ -15,7 +20,7 @@ def main():
     port = 7861
 
     logger.info(f"Starting Grid Inference Worker on http://{host}:{port}")
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

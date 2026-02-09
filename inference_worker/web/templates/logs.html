@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Grid Inference Worker — Logs{% endblock %}
+{% block nav_logs %}active{% endblock %}
+{% block content %}
+<div x-data="logViewer()" x-init="poll()">
+  <div class="page-header" style="display: flex; align-items: center; justify-content: space-between;">
+    <h1>Logs</h1>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <label class="checkbox-label" style="font-size: 0.78rem; color: var(--text-dim);">
+        <input type="checkbox" x-model="autoScroll"> Auto-scroll
+      </label>
+      <button class="btn btn-outline btn-sm" @click="clear()">Clear</button>
+    </div>
+  </div>
+
+  <div class="log-container" x-ref="logBox">
+    <template x-for="(line, i) in lines" :key="i">
+      <div class="log-line" :class="{
+        'log-error': line.includes('[ERROR]'),
+        'log-warn': line.includes('[WARNING]'),
+        'log-info': line.includes('[INFO]'),
+      }" x-text="line"></div>
+    </template>
+    <div class="log-line log-dim" x-show="lines.length === 0">No log output yet...</div>
+  </div>
+</div>
+
+<script>
+function logViewer() {
+  return {
+    lines: [],
+    autoScroll: true,
+    _interval: null,
+
+    async poll() {
+      const update = async () => {
+        try {
+          const r = await fetch('/api/logs');
+          const d = await r.json();
+          this.lines = d.lines || [];
+          if (this.autoScroll) {
+            this.$nextTick(() => {
+              const box = this.$refs.logBox;
+              if (box) box.scrollTop = box.scrollHeight;
+            });
+          }
+        } catch (e) {}
+      };
+      await update();
+      this._interval = setInterval(update, 2000);
+    },
+
+    clear() {
+      this.lines = [];
+    }
+  }
+}
+</script>
+{% endblock %}

@@ -55,7 +55,7 @@ class APIClient:
         if response.status_code == 200:
             resp_data = response.json()
             reward = resp_data.get("reward", 0)
-            logger.info(f"Job submitted successfully — earned {reward} kudos")
+            logger.debug(f"Submit OK — {reward} 電")
             return resp_data
         else:
             logger.error(f"Submit error [{response.status_code}]: {response.text}")
