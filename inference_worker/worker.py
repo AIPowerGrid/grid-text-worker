@@ -130,7 +130,7 @@ def strip_thinking_tags(text: str) -> str:
     """Remove think-tag blocks so we never show thinking to users."""
     if not text:
         return text
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    return re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", text, flags=re.DOTALL).strip()
 
 
 class TextWorker:

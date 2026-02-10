@@ -115,7 +115,8 @@
             <span class="field-label">Model</span>
             <template x-if="available_models.length > 0">
               <select x-model="config.model_name" @change="updateGridModelName(); fetchContextLength()">
-                <option value="" disabled>Select a model...</option>
+                <option value="" disabled selected
+                        x-text="available_models.length + ' model' + (available_models.length !== 1 ? 's' : '') + ' detected — select one'"></option>
                 <template x-for="m in available_models" :key="m">
                   <option :value="m" x-text="m"></option>
                 </template>
@@ -635,14 +636,9 @@ function setupWizard() {
       this.config.engine_name = b.name;
       this.config.api_type = b.api_type;
       this.available_models = b.models || [];
-      if (this.available_models.length > 0) {
-        this.config.model_name = this.available_models[0];
-      } else {
-        this.config.model_name = '';
-      }
+      this.config.model_name = '';
+      this.config.grid_model_name = '';
       this.url_check = { reachable: true, checked: true, name: b.name, version: b.version };
-      this.updateGridModelName();
-      this.fetchContextLength();
     },
 
     async runDetect() {
@@ -678,9 +674,6 @@ function setupWizard() {
           this.config.engine = d.engine || '';
           this.config.engine_name = d.name || '';
           this.available_models = d.models || [];
-          if (this.available_models.length > 0 && !this.config.model_name) {
-            this.config.model_name = this.available_models[0];
-          }
         }
       } finally {
         this.checking_url = false;
