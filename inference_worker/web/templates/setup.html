@@ -293,7 +293,7 @@
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.65rem;">
             <span class="field-label" style="margin-bottom: 0;">Reward Wallet</span>
             <span class="chain-badge">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#0052FF"/><path d="M8.5 5.5v13H12a6.5 6.5 0 000-13H8.5z" fill="#fff"/></svg>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#0000FF"/><path d="M8.5 4V20H11C17 20 17 8 11 8H8.5Z" fill="#fff"/></svg>
               Base
             </span>
           </div>
@@ -310,7 +310,7 @@
           <div x-show="config.wallet_address" x-cloak>
             <div class="wallet-connected">
               <div class="address-pill" :class="walletValid ? 'valid' : 'invalid'">
-                <svg class="chain-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="12" fill="#0052FF"/><path d="M8.5 5.5v13H12a6.5 6.5 0 000-13H8.5z" fill="#fff"/></svg>
+                <svg class="chain-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#0000FF"/><path d="M8.5 4V20H11C17 20 17 8 11 8H8.5Z" fill="#fff"/></svg>
                 <span class="address-text" x-text="(config.wallet_address || '').slice(0,6) + '...' + (config.wallet_address || '').slice(-4)"></span>
               </div>
               <button type="button" class="btn-clear" @click="config.wallet_address = ''">Clear</button>
