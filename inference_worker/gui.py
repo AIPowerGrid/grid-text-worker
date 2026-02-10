@@ -1,6 +1,5 @@
 """Tkinter GUI window — control panel for the Grid Inference Worker."""
 
-import subprocess
 import sys
 import threading
 import webbrowser
@@ -102,10 +101,26 @@ def run(url: str, ready: threading.Event = None):
             else:
                 mb.showerror("Service", "Could not install service.", parent=root)
 
+    def clear_config_action():
+        import tkinter.messagebox as mb
+        from .env_utils import ENV_PATH
+        ok = mb.askyesno(
+            "Clear Config",
+            "This will erase your API key, model selection, and all worker settings.\n\n"
+            "Are you sure?",
+            icon="warning",
+            parent=root,
+        )
+        if ok:
+            try:
+                ENV_PATH.unlink(missing_ok=True)
+                mb.showinfo("Clear Config", "Config cleared. Close and reopen to set up again.", parent=root)
+            except Exception as e:
+                mb.showerror("Clear Config", f"Could not clear config: {e}", parent=root)
+
     buttons = [
         ("Open Dashboard", lambda: webbrowser.open(url)),
         ("Install Service", install_service_action),
-        ("Restart worker", lambda: (subprocess.Popen(sys.argv if getattr(sys, 'frozen', False) else [sys.executable] + sys.argv), root.destroy(), sys.exit(0))),
         ("Exit", lambda: (root.destroy(), sys.exit(0))),
     ]
 
@@ -130,6 +145,28 @@ def run(url: str, ready: threading.Event = None):
             )
         b.pack(fill=tk.X, pady=4)
         btn_widgets.append((label, b))
+
+    # Red "Clear Config" button — only enabled if worker is configured
+    from .env_utils import is_configured
+    if is_mac:
+        clear_btn = tk.Button(
+            btn_f, text="Clear Config", command=clear_config_action,
+            highlightbackground="#1e293b",
+            padx=12, pady=6, cursor="hand2",
+            font=("TkDefaultFont", 9),
+        )
+    else:
+        clear_btn = tk.Button(
+            btn_f, text="Clear Config", command=clear_config_action,
+            bg="#7f1d1d", fg="#fca5a5",
+            activebackground="#991b1b", activeforeground="#fecaca",
+            highlightbackground="#1e293b", highlightcolor="#1e293b",
+            relief=tk.FLAT, borderwidth=0, padx=12, pady=6, cursor="hand2",
+            font=("Segoe UI", 9),
+        )
+    clear_btn.pack(fill=tk.X, pady=4)
+    if not is_configured():
+        clear_btn.configure(state=tk.DISABLED)
 
     # Disable "Open Dashboard" until the server is ready
     dash_btn = btn_widgets[0][1]
