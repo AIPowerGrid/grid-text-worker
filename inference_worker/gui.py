@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import threading
 import webbrowser
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def _logo_png_path():
     return Path(__file__).resolve().parent / "web" / "static" / "logo.png"
 
 
-def run(url: str):
+def run(url: str, ready: threading.Event = None):
     """Show the Tkinter control window. Server is already running."""
     _enable_dpi_awareness()
 
@@ -107,9 +108,9 @@ def run(url: str):
     ]
 
     is_mac = sys.platform == "darwin"
+    btn_widgets = []
     for label, cmd in buttons:
         if is_mac:
-            # macOS Aqua ignores bg/fg on buttons — use native styling
             b = tk.Button(
                 btn_f, text=label, command=cmd,
                 highlightbackground="#1e293b",
@@ -126,6 +127,20 @@ def run(url: str):
                 font=("Segoe UI", 9),
             )
         b.pack(fill=tk.X, pady=4)
+        btn_widgets.append((label, b))
+
+    # Disable "Open Dashboard" until the server is ready
+    dash_btn = btn_widgets[0][1]
+    if ready and not ready.is_set():
+        dash_btn.configure(state=tk.DISABLED, text="Starting...")
+
+        def check_ready():
+            if ready.is_set():
+                dash_btn.configure(state=tk.NORMAL, text="Open Dashboard")
+            else:
+                root.after(250, check_ready)
+
+        root.after(250, check_ready)
 
     root.protocol("WM_DELETE_WINDOW", lambda: (root.destroy(), sys.exit(0)))
 

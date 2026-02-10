@@ -119,12 +119,29 @@ def main():
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
+    # Wait for the web server to be ready in a background thread
+    ready = threading.Event()
+
+    def wait_for_server():
+        import urllib.request
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(url, timeout=1)
+                ready.set()
+                return
+            except Exception:
+                import time
+                time.sleep(0.5)
+
+    threading.Thread(target=wait_for_server, daemon=True).start()
+
     if args.gui and _has_display():
         from . import gui
-        gui.run(url)
+        gui.run(url, ready)
     else:
-        # Console mode: print URL, auto-open browser if display available
+        # Console mode: wait for ready, print URL, auto-open browser
         logger = logging.getLogger(__name__)
+        ready.wait(timeout=30)
         logger.info(f"Dashboard: {url}")
         if _has_display():
             webbrowser.open(url)
