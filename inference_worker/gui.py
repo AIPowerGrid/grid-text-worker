@@ -101,14 +101,21 @@ def run(url: str, ready: threading.Event = None):
             ok = mb.askyesno(
                 "Remove Service",
                 "Remove the background service?\n\n"
-                "The worker will no longer start automatically on login.\n"
-                "This window stays open.",
+                "The worker will stop running in the background.\n"
+                "The app will restart in user mode.",
                 parent=root,
             )
             if not ok:
                 return
             if service.uninstall(verbose=False):
-                mb.showinfo("Service", "Service removed.", parent=root)
+                # Relaunch in user mode so the web server starts fresh
+                import subprocess
+                if getattr(sys, "frozen", False):
+                    subprocess.Popen([sys.executable])
+                else:
+                    subprocess.Popen([sys.executable, "-m", "inference_worker.cli"])
+                root.destroy()
+                sys.exit(0)
             else:
                 mb.showerror("Service", "Could not remove service.", parent=root)
             _update_service_label()
