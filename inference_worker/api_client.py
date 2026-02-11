@@ -32,6 +32,8 @@ class APIClient:
             "threads": Settings.MAX_THREADS,
             "bridge_agent": BRIDGE_AGENT,
         }
+        if Settings.WALLET_ADDRESS:
+            payload["wallet_address"] = Settings.WALLET_ADDRESS
 
         logger.debug(f"pop_job payload: {payload}")
         try:
