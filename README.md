@@ -124,3 +124,10 @@ grid-inference-worker --uninstall-service
 **Ollama** is the easiest way to get started. The setup wizard auto-detects it and lets you pick a model.
 
 For any backend that exposes an **OpenAI-compatible API** (`/v1/chat/completions`), set `BACKEND_TYPE=openai` and point `OPENAI_URL` at it.
+
+### vLLM Documentation
+
+For high-performance inference with vLLM, see our detailed guides:
+
+- **[vLLM Setup Guide](docs/vllm-setup-guide.md)** - Installation, configuration, and integration
+- **[vLLM Optimization Guide](docs/vllm-optimization-guide.md)** - Performance tuning, benchmarking, and production best practices
