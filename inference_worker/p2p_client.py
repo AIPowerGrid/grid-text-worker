@@ -3,16 +3,23 @@
 
 """P2P client for decentralized Grid workers.
 
-Uses libp2p gossipsub to:
-1. Join the P2P mesh
+Uses libp2p to:
+1. Join the P2P mesh via gossipsub
 2. Subscribe to job topics for configured model
 3. Claim jobs using deterministic selection
-4. Stream results back via gossipsub
+4. Stream results back via DIRECT CONNECTION to requester
 
 Enable with P2P_ENABLED=true in your .env.
 
 This worker runs trio directly (not asyncio) since it's standalone.
+
+Architecture:
+- Gossipsub: job broadcasts, claim broadcasts (one-to-many)
+- Direct streams: result streaming to requester (one-to-one, efficient)
 """
+
+# Protocol ID for direct result streaming
+RESULT_STREAM_PROTOCOL = "/aipg/1/result-stream"
 
 import hashlib
 import json
@@ -67,11 +74,15 @@ class JobRequest:
     user_pubkey: str
     signature: str
     timestamp: float
+    requester_peer_id: str = ""  # Peer ID to stream results to
     ttl: int = 60
 
     @classmethod
     def from_json(cls, data: str) -> "JobRequest":
         d = json.loads(data)
+        # Handle missing requester_peer_id for backwards compatibility
+        if "requester_peer_id" not in d:
+            d["requester_peer_id"] = ""
         return cls(**d)
 
     def is_expired(self) -> bool:
@@ -310,11 +321,20 @@ class P2PWorker:
                 await trio.sleep(0.1)
 
     async def _handle_job(self, job: JobRequest) -> None:
-        """Process a single job."""
+        """Process a single job.
+
+        Opens a direct stream to the requester and streams results over it.
+        More efficient than gossipsub for high-frequency token streaming.
+        """
+        from libp2p.peer.id import ID
+        from libp2p.custom_types import TProtocol
+        import multiaddr
+
         job_id = job.id
         payload = job.payload
+        requester_peer_id = job.requester_peer_id
 
-        # Broadcast our claim
+        # Broadcast our claim via gossipsub
         claim = JobClaim(
             job_id=job_id,
             worker_id=self.peer_id,
@@ -328,10 +348,8 @@ class P2PWorker:
 
         # Extract prompt - handle both formats
         if "messages" in payload:
-            # OpenAI format
             messages = payload["messages"]
         elif "prompt" in payload:
-            # Simple format
             messages = [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": payload["prompt"]},
@@ -346,6 +364,21 @@ class P2PWorker:
 
         logger.info(f"📥 Processing {job_id[:8]} | max_tokens={max_tokens}")
 
+        # Open direct stream to requester
+        stream = None
+        if requester_peer_id:
+            try:
+                peer_id = ID.from_base58(requester_peer_id)
+                stream = await self._host.new_stream(
+                    peer_id, [TProtocol(RESULT_STREAM_PROTOCOL)]
+                )
+                # Send job_id as first line
+                await stream.write(f"{job_id}\n".encode())
+                logger.debug(f"Opened result stream to {requester_peer_id[:8]}")
+            except Exception as e:
+                logger.warning(f"Failed to open stream to requester: {e}")
+                stream = None
+
         # Build OpenAI-compatible request
         openai_payload = {
             "model": self.model_name,
@@ -358,11 +391,22 @@ class P2PWorker:
 
         url = self._get_completions_url()
         headers = self._get_auth_headers()
-        result_topic = results_topic(job_id)
 
         full_text = ""
         token_count = 0
         start_time = time.time()
+
+        async def send_result(result_dict: dict) -> None:
+            """Send result via stream or fallback to gossipsub."""
+            data = json.dumps(result_dict).encode() + b"\n"
+            if stream:
+                try:
+                    await stream.write(data)
+                except Exception as e:
+                    logger.warning(f"Stream write failed: {e}")
+            else:
+                # Fallback to gossipsub (less efficient)
+                await self._pubsub.publish(results_topic(job_id), data)
 
         # Use httpx with trio backend
         async with httpx.AsyncClient(timeout=120) as client:
@@ -371,15 +415,14 @@ class P2PWorker:
                     if response.status_code != 200:
                         body = await response.aread()
                         logger.error(f"Backend error {response.status_code}: {body[:200]}")
-                        await self._pubsub.publish(
-                            result_topic,
-                            json.dumps({
-                                "job_id": job_id,
-                                "worker_id": self.peer_id,
-                                "type": "error",
-                                "error": {"message": f"Backend error: {response.status_code}", "code": response.status_code},
-                            }).encode()
-                        )
+                        await send_result({
+                            "job_id": job_id,
+                            "worker_id": self.peer_id,
+                            "type": "error",
+                            "error": {"message": f"Backend error: {response.status_code}", "code": response.status_code},
+                        })
+                        if stream:
+                            await stream.close()
                         return
 
                     async for line in response.aiter_lines():
@@ -399,53 +442,54 @@ class P2PWorker:
                                     full_text += content
                                     token_count += 1
 
-                                    # Publish token to result topic
-                                    await self._pubsub.publish(
-                                        result_topic,
-                                        json.dumps({
-                                            "job_id": job_id,
-                                            "worker_id": self.peer_id,
-                                            "type": "token",
-                                            "token": {"text": content, "index": token_count},
-                                        }).encode()
-                                    )
+                                    # Stream token via direct connection
+                                    await send_result({
+                                        "job_id": job_id,
+                                        "worker_id": self.peer_id,
+                                        "type": "token",
+                                        "token": {"text": content, "index": token_count},
+                                    })
                         except (json.JSONDecodeError, IndexError, KeyError):
                             continue
 
             except (httpx.ConnectError, httpx.ReadTimeout) as e:
                 logger.error(f"Backend error: {e}")
-                await self._pubsub.publish(
-                    result_topic,
-                    json.dumps({
-                        "job_id": job_id,
-                        "worker_id": self.peer_id,
-                        "type": "error",
-                        "error": {"message": str(e), "code": 0},
-                    }).encode()
-                )
+                await send_result({
+                    "job_id": job_id,
+                    "worker_id": self.peer_id,
+                    "type": "error",
+                    "error": {"message": str(e), "code": 0},
+                })
+                if stream:
+                    await stream.close()
                 return
 
-        # Publish completion
+        # Send completion
         gen_time = time.time() - start_time
-        await self._pubsub.publish(
-            result_topic,
-            json.dumps({
-                "job_id": job_id,
-                "worker_id": self.peer_id,
-                "type": "done",
-                "done": {
-                    "full_text": full_text,
-                    "token_count": token_count,
-                    "receipt_signature": "",
-                },
-            }).encode()
-        )
+        await send_result({
+            "job_id": job_id,
+            "worker_id": self.peer_id,
+            "type": "done",
+            "done": {
+                "full_text": full_text,
+                "token_count": token_count,
+                "receipt_signature": "",
+            },
+        })
+
+        # Close the stream
+        if stream:
+            try:
+                await stream.close()
+            except:
+                pass
 
         self._jobs_completed += 1
         tps = token_count / gen_time if gen_time > 0 else 0
+        stream_type = "direct" if stream else "gossipsub"
         logger.info(
             f"✅ {job_id[:8]} | {token_count} tokens | {gen_time:.1f}s | "
-            f"{tps:.1f} TPS | total: {self._jobs_completed}"
+            f"{tps:.1f} TPS | {stream_type} | total: {self._jobs_completed}"
         )
 
         # Cleanup old claims periodically
