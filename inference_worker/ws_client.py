@@ -189,6 +189,7 @@ class StreamingWorker:
                     }))
                     return
 
+                reasoning_open = False
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -199,19 +200,37 @@ class StreamingWorker:
                     try:
                         chunk = json.loads(data_str)
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
+                        # Reasoning models stream chain-of-thought in a separate
+                        # field. Surface it LIVE, wrapped in <think>…</think>, so
+                        # the UI renders a collapsible "thinking" section instead
+                        # of showing nothing for ~60s before the answer.
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                        content = delta.get("content") or ""
+
+                        if reasoning:
+                            if not reasoning_open:
+                                reasoning_open = True
+                                full_text += "<think>"
+                                await self.ws.send(json.dumps({"type": "token", "id": job_id, "text": "<think>"}))
+                            full_text += reasoning
+                            token_count += 1
+                            await self.ws.send(json.dumps({"type": "token", "id": job_id, "text": reasoning}))
+
                         if content:
-                            content = _strip_thinking_tags(content) if "<think" in content else content
-                            if content:
-                                full_text += content
-                                token_count += 1
-                                await self.ws.send(json.dumps({
-                                    "type": "token",
-                                    "id": job_id,
-                                    "text": content,
-                                }))
+                            if reasoning_open:
+                                reasoning_open = False
+                                full_text += "</think>\n\n"
+                                await self.ws.send(json.dumps({"type": "token", "id": job_id, "text": "</think>\n\n"}))
+                            full_text += content
+                            token_count += 1
+                            await self.ws.send(json.dumps({"type": "token", "id": job_id, "text": content}))
                     except (json.JSONDecodeError, IndexError, KeyError):
                         continue
+
+                # Close an unterminated think block (model hit max_tokens mid-thought)
+                if reasoning_open:
+                    full_text += "</think>\n\n"
+                    await self.ws.send(json.dumps({"type": "token", "id": job_id, "text": "</think>\n\n"}))
 
         except (httpx.ConnectError, httpx.ReadTimeout) as e:
             logger.error(f"Backend error during streaming: {e}")
