@@ -87,7 +87,7 @@ async def auth_guard(request: Request, call_next):
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     next_url = request.query_params.get("next", "/")
-    return templates.TemplateResponse("login.html", {"request": request, "next": next_url})
+    return templates.TemplateResponse(request, "login.html", {"request": request, "next": next_url})
 
 
 @app.post("/login")
@@ -101,7 +101,7 @@ async def login_submit(request: Request):
             "_token", token, httponly=True, samesite="lax", max_age=86400 * 365,
         )
         return response
-    return templates.TemplateResponse("login.html", {
+    return templates.TemplateResponse(request, "login.html", {
         "request": request, "next": next_url, "error": "Invalid token",
     })
 
@@ -113,7 +113,7 @@ async def login_submit(request: Request):
 async def setup_page(request: Request):
     # Don't run detect_backends() here — it scans 8+ ports (3s timeout each) and blocks 30–45s.
     # The setup page calls POST /api/setup/detect on load instead; page loads instantly.
-    return templates.TemplateResponse("setup.html", {
+    return templates.TemplateResponse(request, "setup.html", {
         "request": request,
         "detection": DetectionResult(),
         "platform": get_platform(),
@@ -273,7 +273,7 @@ async def api_complete_setup(request: Request):
 # ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {
+    return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
         "worker_running": worker_state["running"],
         "worker_error": worker_state.get("error"),
@@ -316,7 +316,7 @@ async def api_status():
 # ---------------------------------------------------------------------------
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
-    return templates.TemplateResponse("logs.html", {"request": request})
+    return templates.TemplateResponse(request, "logs.html", {"request": request})
 
 
 @app.get("/api/logs")
@@ -329,7 +329,7 @@ async def api_logs():
 # ---------------------------------------------------------------------------
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    return templates.TemplateResponse("settings.html", {
+    return templates.TemplateResponse(request, "settings.html", {
         "request": request,
         "settings": {
             "GRID_API_KEY": Settings.GRID_API_KEY,
