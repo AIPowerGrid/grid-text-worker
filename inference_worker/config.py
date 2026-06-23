@@ -75,8 +75,12 @@ class Settings:
     #    {"days":"sat-sun","concurrency":5}]
     # Outside any window → MAX_THREADS. concurrency:0 = pause (off the grid).
     GRID_SCHEDULE = os.getenv("GRID_SCHEDULE", "")
-    MAX_LENGTH = int(os.getenv("GRID_MAX_LENGTH", "4096"))
-    MAX_CONTEXT_LENGTH = int(os.getenv("GRID_MAX_CONTEXT_LENGTH", "4096"))
+    # Generous defaults for 2026-era models. MAX_LENGTH is the OUTPUT budget used
+    # only when a request doesn't specify max_tokens — an explicit client value is
+    # honored as-is (we no longer clamp it down). 4096 used to guillotine long
+    # generations and starve multi-step tool calls.
+    MAX_LENGTH = int(os.getenv("GRID_MAX_LENGTH", "32768"))
+    MAX_CONTEXT_LENGTH = int(os.getenv("GRID_MAX_CONTEXT_LENGTH", "131072"))
 
     # Backend type: "ollama" (easy mode) or "openai" (advanced/custom)
     BACKEND_TYPE = os.getenv("BACKEND_TYPE", "ollama")
@@ -96,8 +100,10 @@ class Settings:
     # Grid model name (what to advertise to the grid, with domain prefix)
     GRID_MODEL_NAME = os.getenv("GRID_MODEL_NAME", "")
 
-    # Streaming mode — connect via WebSocket instead of HTTP polling
-    GRID_STREAMING = os.getenv("GRID_STREAMING", "false").lower() == "true"
+    # Streaming (WebSocket /v1) is the only live mode — the legacy /v2 poll
+    # queue is retired. Defaults ON; set "false" only knowingly (the worker
+    # refuses rather than poll the dead /v2 endpoint).
+    GRID_STREAMING = os.getenv("GRID_STREAMING", "true").lower() == "true"
     GRID_STREAMING_URL = os.getenv("GRID_STREAMING_URL", "")  # Override WS URL (auto-derived from GRID_API_URL if empty)
 
     # P2P mode — connect via libp2p gossipsub instead of WebSocket

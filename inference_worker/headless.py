@@ -323,35 +323,19 @@ def run(args):
             print("\n  Shutting down...")
         return
 
-    # Streaming: run the multi-backend supervisor so EVERY backend in
-    # GRID_BACKENDS is served (not just the first). Falls back to the single
-    # TextWorker poll loop only when streaming is off (legacy).
-    if Settings.GRID_STREAMING:
-        from .ws_client import run_workers
-        print("  ⚡ Streaming mode — WebSocket connection(s)")
-        try:
-            asyncio.run(run_workers())
-        except KeyboardInterrupt:
-            print("\n  Shutting down...")
-        return
+    # Streaming-only: the multi-backend supervisor serves EVERY backend in
+    # GRID_BACKENDS over WebSocket (/v1). The legacy /v2 HTTP poll loop is
+    # retired, so GRID_STREAMING=false is refused rather than polling a dead
+    # endpoint.
+    if not Settings.GRID_STREAMING:
+        print("  Error: legacy HTTP polling (/v2) is retired. This worker is")
+        print("  streaming-only. Remove GRID_STREAMING=false from your .env")
+        print("  (or set GRID_STREAMING=true) and restart.")
+        sys.exit(1)
 
-    from .worker import TextWorker
-    worker = TextWorker()
-
-    async def _run():
-        try:
-            await worker.run()
-        except asyncio.CancelledError:
-            pass
-        finally:
-            if hasattr(worker, 'cleanup'):
-                await worker.cleanup()
-            elif hasattr(worker, 'stop'):
-                await worker.stop()
-            elif hasattr(worker, 'close'):
-                await worker.close()
-
+    from .ws_client import run_workers
+    print("  ⚡ Streaming mode — WebSocket connection(s)")
     try:
-        asyncio.run(_run())
+        asyncio.run(run_workers())
     except KeyboardInterrupt:
         print("\n  Shutting down...")

@@ -11,7 +11,6 @@ from fastapi.templating import Jinja2Templates
 
 from ..config import Settings
 from ..env_utils import is_configured, ensure_dashboard_token
-from ..worker import TextWorker
 
 logger = logging.getLogger(__name__)
 
@@ -58,19 +57,18 @@ worker_state = {
 
 
 async def _run_worker():
-    """Run the text worker loop as a background task."""
-    from ..config import Settings
-    if Settings.GRID_STREAMING:
-        from ..ws_client import StreamingWorker
-        worker = StreamingWorker()
-        logger.info("⚡ Streaming mode enabled — connecting via WebSocket")
-    else:
-        worker = TextWorker()
-    worker_state["worker"] = worker
+    """Run the multi-backend streaming supervisor as a background task.
+
+    Serves every backend in GRID_BACKENDS over WebSocket (/v1). The legacy /v2
+    HTTP poll loop (TextWorker) is retired along with the grid's /v2 API, so the
+    worker is streaming-only now."""
+    from ..ws_client import run_workers
+    worker_state["worker"] = None
     worker_state["running"] = True
     worker_state["error"] = None
+    logger.info("⚡ Streaming mode — connecting backend(s) via WebSocket")
     try:
-        await worker.run()
+        await run_workers()
     except asyncio.CancelledError:
         logger.info("Worker task cancelled.")
     except Exception as e:
@@ -78,7 +76,6 @@ async def _run_worker():
         worker_state["error"] = str(e)
     finally:
         worker_state["running"] = False
-        await worker.cleanup()
 
 
 async def start_worker():

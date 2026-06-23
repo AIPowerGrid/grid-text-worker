@@ -392,15 +392,18 @@ class StreamingWorker:
             openai_payload = dict(request)
             openai_payload["model"] = self.model_name
             openai_payload["stream"] = True
-            req_max = openai_payload.get("max_tokens") or payload.get("max_length") or Settings.MAX_LENGTH
-            openai_payload["max_tokens"] = min(int(req_max), Settings.MAX_LENGTH)
+            # Honor the client's requested output budget as-is — do NOT clamp it
+            # down (that cut off long generations and starved tool-call loops).
+            # Fall back to MAX_LENGTH only when the request didn't specify one.
+            req_max = openai_payload.get("max_tokens") or payload.get("max_length")
+            openai_payload["max_tokens"] = int(req_max) if req_max else Settings.MAX_LENGTH
             stream_opts = dict(openai_payload.get("stream_options") or {})
             stream_opts["include_usage"] = True
             openai_payload["stream_options"] = stream_opts
             faithful = True
         else:
             prompt = payload.get("prompt", "")
-            max_tokens = min(int(payload.get("max_length", 512) or 512), Settings.MAX_LENGTH)
+            max_tokens = int(payload.get("max_length") or Settings.MAX_LENGTH)
             openai_payload = {
                 "model": self.model_name,
                 "messages": [{"role": "user", "content": prompt}],
@@ -579,10 +582,8 @@ class StreamingWorker:
 
         request = dict(payload.get("request") or {})
         request["model"] = self.model_name
-        # Clamp the output budget to what we advertise (field name differs by API).
-        for k in ("max_tokens", "max_output_tokens"):
-            if request.get(k):
-                request[k] = min(int(request[k]), Settings.MAX_LENGTH)
+        # Honor the client's output budget as-is (field name differs by API); the
+        # backend's own context window is the real ceiling. We don't clamp it down.
         stream = bool(request.get("stream", False))
         url = self._endpoint_url(suffix)
         headers = self._get_auth_headers()
