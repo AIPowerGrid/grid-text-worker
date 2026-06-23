@@ -2,7 +2,9 @@
 
 import asyncio
 import getpass
+import json
 import sys
+import textwrap
 
 from .config import Settings
 from .env_utils import ENV_PATH, is_configured, write_env, reload_settings
@@ -10,205 +12,257 @@ from .worker import ENLISTMENT_PROMPT, strip_thinking_tags
 from . import service
 
 
-def quick_setup() -> dict:
-    """Interactive terminal setup. Returns config dict ready for .env."""
+def _slug(s: str) -> str:
+    import re
+    return re.sub(r"[^A-Za-z0-9.]+", "-", s).strip("-").lower()[:32] or "model"
+
+
+def _norm_openai_base(url: str) -> str:
+    """Strip a trailing /v1 (and slashes) so we have a clean base to probe."""
+    u = url.strip().rstrip("/")
+    if u.endswith("/v1"):
+        u = u[:-3]
+    return u
+
+
+def _validate_backend(base_url: str, engine: str, model: str, api_key: str) -> tuple[bool, str]:
+    """Fire a real completion at the backend/model. This IS the validation:
+    confirms the URL, the key, and that the model name actually serves.
+    Returns (ok, message)."""
     import httpx
-    from .detect_backends import detect_backends, check_backend_url, list_models_for_backend
 
-    print()
-    print("  +- Grid Inference Worker -----------------------+")
-    print("  | No configuration found. Starting quick setup.  |")
-    print("  +------------------------------------------------+")
-    print()
-
-    config = {}
-
-    # --- Backend detection ---
-    print("  Scanning for backends...", end=" ", flush=True)
-    detection = detect_backends()
-
-    if detection.found:
-        b = detection.backends[0]
-        print(f"found {b.name} @ {b.url}", end="")
-        if b.version:
-            print(f" (v{b.version})", end="")
-        print()
-
-        config["BACKEND_TYPE"] = "ollama" if b.engine == "ollama" else "openai"
-        if b.engine == "ollama":
-            config["OLLAMA_URL"] = b.url
-        else:
-            config["OPENAI_URL"] = b.url + "/v1"
-        backend_url = b.url
-        engine = b.engine
-        models = b.models
-
-        if len(detection.backends) > 1:
-            print()
-            print("  Detected backends:")
-            for i, be in enumerate(detection.backends, 1):
-                tag = f" (v{be.version})" if be.version else ""
-                print(f"    [{i}] {be.name} @ {be.url}{tag}")
-            choice = input(f"\n  Select backend [1]: ").strip()
-            if choice and choice.isdigit():
-                idx = int(choice) - 1
-                if 0 <= idx < len(detection.backends):
-                    b = detection.backends[idx]
-                    config["BACKEND_TYPE"] = "ollama" if b.engine == "ollama" else "openai"
-                    if b.engine == "ollama":
-                        config["OLLAMA_URL"] = b.url
-                    else:
-                        config["OPENAI_URL"] = b.url + "/v1"
-                    backend_url = b.url
-                    engine = b.engine
-                    models = b.models
-    else:
-        print("none found.")
-        print()
-        backend_url = input("  Backend URL: ").strip()
-        if not backend_url:
-            print("  No backend URL provided. Exiting.")
-            sys.exit(1)
-
-        print("  Checking...", end=" ", flush=True)
-        info = asyncio.run(check_backend_url(backend_url))
-
-        if info.get("auth_required"):
-            print("authentication required.")
-            api_key = getpass.getpass("  API key for this backend: ")
-            config["OPENAI_API_KEY"] = api_key
-            info = asyncio.run(check_backend_url(backend_url, api_key=api_key))
-
-        if info.get("reachable"):
-            name = info.get("name", "Unknown")
-            print(f"connected ({name})")
-        else:
-            print("could not connect.")
-            cont = input("  Continue anyway? [y/N]: ").strip().lower()
-            if cont != "y":
-                sys.exit(1)
-
-        engine = info.get("engine", "openai-compat")
-        if engine == "ollama":
-            config["BACKEND_TYPE"] = "ollama"
-            config["OLLAMA_URL"] = backend_url
-        else:
-            config["BACKEND_TYPE"] = "openai"
-            config["OPENAI_URL"] = backend_url.rstrip("/") + "/v1"
-
-        models = info.get("models", [])
-        if not models:
-            models = asyncio.run(list_models_for_backend(
-                backend_url, engine, api_key=config.get("OPENAI_API_KEY", ""),
-            ))
-
-    # --- Model selection ---
-    print()
-    if models:
-        print("  Available models:")
-        for i, m in enumerate(models[:20], 1):
-            print(f"    [{i}] {m}")
-        if len(models) > 20:
-            print(f"    ... and {len(models) - 20} more")
-        print(f"    [{len(models[:20]) + 1}] Enter model name manually")
-        print()
-        choice = input(f"  Select model [1]: ").strip()
-        if not choice:
-            model = models[0]
-        elif choice.isdigit():
-            idx = int(choice) - 1
-            if 0 <= idx < len(models[:20]):
-                model = models[idx]
-            else:
-                model = input("  Model name: ").strip()
-        else:
-            model = choice
-    else:
-        model = input("  Model name (e.g. llama3.2:3b): ").strip()
-
-    if not model:
-        print("  No model selected. Exiting.")
-        sys.exit(1)
-    config["MODEL_NAME"] = model
-    config["GRID_MODEL_NAME"] = f"grid/{model}"
-
-    # --- Grid API key ---
-    api_key = getpass.getpass("  Grid API key: ")
-    if not api_key:
-        print("  No API key provided. Exiting.")
-        sys.exit(1)
-    config["GRID_API_KEY"] = api_key
-
-    # --- Worker name ---
-    from .config import default_worker_name
-    suggested = default_worker_name()
-    worker_name = input(f"  Worker name [{suggested}]: ").strip()
-    config["GRID_WORKER_NAME"] = worker_name or suggested
-
-    # --- Streaming mode ---
-    print()
-    print("  Connection mode:")
-    print("    [1] Standard — HTTP polling (compatible with all setups)")
-    print("    [2] Streaming — WebSocket + token streaming (experimental)")
-    stream_choice = input("  [1]: ").strip()
-    if stream_choice == "2":
-        config["GRID_STREAMING"] = "true"
-        streaming_url = input("  Streaming API URL [auto]: ").strip()
-        if streaming_url:
-            config["GRID_STREAMING_URL"] = streaming_url
-        print("  ⚡ Streaming mode enabled")
-    else:
-        config["GRID_STREAMING"] = "false"
-
-    # --- Enlistment test ---
-    print()
-    print(f"  Enlisting {model}...", flush=True)
-
-    prompt = ENLISTMENT_PROMPT.format(model=model)
-
-    chat_url = f"{backend_url.rstrip('/')}/v1/chat/completions"
+    chat_url = f"{base_url.rstrip('/')}/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
-    if config.get("OPENAI_API_KEY"):
-        headers["Authorization"] = f"Bearer {config['OPENAI_API_KEY']}"
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 80,
-        "temperature": 0.8,
+        "messages": [{"role": "user", "content": ENLISTMENT_PROMPT.format(model=model)}],
+        "max_tokens": 64,
+        "temperature": 0.7,
     }
     if engine == "ollama":
         payload["think"] = False
-
     try:
-        with httpx.Client(timeout=30) as client:
+        with httpx.Client(timeout=40) as client:
             resp = client.post(chat_url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                choice = data.get("choices", [{}])[0]
-                reply = (choice.get("message", {}).get("content") or "").strip()
-                reply = strip_thinking_tags(reply)
-                if choice.get("finish_reason") == "length":
-                    reply += " ..."
-                import textwrap
-                wrapped = textwrap.fill(reply, width=68, initial_indent='  "', subsequent_indent='   ')
-                print(f'{wrapped}"')
-            else:
-                print(f"  Warning: backend returned HTTP {resp.status_code} (worker may still work)")
+        if resp.status_code != 200:
+            detail = ""
+            try:
+                detail = resp.json().get("error", {}).get("message", "") or ""
+            except Exception:
+                detail = resp.text[:120]
+            return False, f"HTTP {resp.status_code}{(' — ' + detail) if detail else ''}"
+        data = resp.json()
+        ch = (data.get("choices") or [{}])[0]
+        msg = ch.get("message", {}) or {}
+        # Reasoning models put text in reasoning/reasoning_content with empty content.
+        reply = (msg.get("content") or msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+        reply = strip_thinking_tags(reply)
+        if not reply:
+            reply = "(model responded — empty visible text, likely a reasoning model)"
+        return True, reply
     except Exception as e:
-        print(f"  Warning: enlistment test failed ({e})")
+        return False, str(e)
 
-    # --- Save ---
+
+def _configure_backend(n: int, detection=None) -> dict | None:
+    """Walk the operator through ONE backend: locate → connect → pick model →
+    VALIDATE (live completion) → name it. Returns a GRID_BACKENDS entry dict, or
+    None if skipped. Sets nothing global."""
+    from .detect_backends import check_backend_url, list_models_for_backend
+
     print()
+    print(f"  ── Backend {n} " + "─" * 34)
+
+    base_url = ""
+    engine = "openai-compat"
+    models: list[str] = []
+    api_key = ""
+
+    # Offer auto-detected backends only for the first one.
+    if detection is not None and detection.found:
+        print("  Detected on this host:")
+        for i, be in enumerate(detection.backends, 1):
+            tag = f" (v{be.version})" if be.version else ""
+            print(f"    [{i}] {be.name} @ {be.url}{tag}")
+        print(f"    [m] Enter a different URL (remote endpoint)")
+        choice = input(f"\n  Use backend [1]: ").strip().lower()
+        if choice in ("", *(str(i) for i in range(1, len(detection.backends) + 1))):
+            b = detection.backends[(int(choice) - 1) if choice else 0]
+            base_url = _norm_openai_base(b.url)
+            engine = b.engine
+            models = list(b.models or [])
+            print(f"  → {b.name} @ {base_url}")
+
+    # Manual URL (no detection, "different URL", or any extra backend).
+    if not base_url:
+        base_url = input("  Backend URL (OpenAI-compatible, e.g. https://host/v1): ").strip()
+        if not base_url:
+            return None
+        base_url = _norm_openai_base(base_url)
+
+        print("  Checking…", end=" ", flush=True)
+        info = asyncio.run(check_backend_url(base_url))
+        if info.get("auth_required"):
+            print("auth required.")
+            api_key = getpass.getpass("  API key for this backend: ").strip()
+            info = asyncio.run(check_backend_url(base_url, api_key=api_key))
+        if info.get("reachable"):
+            print(f"connected ({info.get('name', 'OpenAI-compatible')}).")
+        else:
+            print("couldn't reach it.")
+            if input("  Add it anyway? [y/N]: ").strip().lower() != "y":
+                return None
+        engine = info.get("engine") or "openai-compat"
+        models = info.get("models") or asyncio.run(
+            list_models_for_backend(base_url, engine, api_key=api_key)
+        )
+
+    backend_type = "ollama" if engine == "ollama" else "openai"
+
+    # --- Model selection (from the real served list — no typos) ---
+    print()
+    if models:
+        print("  Models served here:")
+        for i, m in enumerate(models[:20], 1):
+            print(f"    [{i}] {m}")
+        if len(models) > 20:
+            print(f"    … and {len(models) - 20} more")
+        sel = input(f"  Select model [1] (or type a name): ").strip()
+        if not sel:
+            model = models[0]
+        elif sel.isdigit() and 1 <= int(sel) <= len(models[:20]):
+            model = models[int(sel) - 1]
+        else:
+            model = sel
+    else:
+        model = input("  Model name: ").strip()
+    if not model:
+        print("  No model — skipping this backend.")
+        return None
+
+    # --- Validate: a real completion against this exact (url, key, model) ---
+    while True:
+        print(f"  Validating {model}… ", end="", flush=True)
+        ok, msg = _validate_backend(base_url, engine, model, api_key)
+        if ok:
+            wrapped = textwrap.fill(
+                msg, width=64, initial_indent='✓\n      "', subsequent_indent="       "
+            )
+            print(wrapped + '"')
+            break
+        print("✗")
+        print(f"      {msg}")
+        nxt = input("  [r]etry  [s]kip backend  [c]ontinue anyway: ").strip().lower()
+        if nxt == "r":
+            continue
+        if nxt == "c":
+            print("  ⚠ added unvalidated — it won't serve jobs until it responds.")
+            break
+        return None
+
+    # --- Name it on the grid ---
+    suggested_grid = _slug(model)
+    grid_model = input(f"  Name shown on the grid [{suggested_grid}]: ").strip() or suggested_grid
+    conc = input("  Concurrency (parallel jobs) [1]: ").strip()
+    concurrency = int(conc) if conc.isdigit() and int(conc) > 0 else 1
+
+    print(f"  ✓ Backend {n}: {model} → \033[1m{grid_model}\033[0m (x{concurrency})")
+    entry = {
+        "type": backend_type,
+        "url": base_url if backend_type == "ollama" else base_url.rstrip("/") + "/v1",
+        "api_key": api_key,
+        "model": model,
+        "grid_model": grid_model,
+        "concurrency": concurrency,
+    }
+    return entry
+
+
+def quick_setup() -> dict:
+    """Interactive terminal setup. Returns config dict ready for .env."""
+    from .detect_backends import detect_backends
+
+    print()
+    print("  ┌─ Grid Inference Worker — quick setup ──────────┐")
+    print("  │  Add one or more model backends; each is        │")
+    print("  │  validated live before it goes on the grid.      │")
+    print("  └─────────────────────────────────────────────────┘")
+
+    print()
+    print("  Scanning for local backends…", end=" ", flush=True)
+    detection = detect_backends()
+    print(f"found {len(detection.backends)}." if detection.found else "none found.")
+
+    # --- Backends (one or many) ---
+    backends: list[dict] = []
+    first = _configure_backend(1, detection=detection)
+    if not first:
+        print("\n  No backend configured. Exiting.")
+        sys.exit(1)
+    backends.append(first)
+
+    while True:
+        print()
+        if input("  Add another backend? [y/N]: ").strip().lower() != "y":
+            break
+        entry = _configure_backend(len(backends) + 1)
+        if entry:
+            backends.append(entry)
+
+    # --- Grid API key (one account key powers all backends) ---
+    print()
+    print("  ── Grid account " + "─" * 33)
+    api_key = getpass.getpass("  Grid API key (dashboard.aipowergrid.io): ").strip()
+    if not api_key:
+        print("  No API key provided. Exiting.")
+        sys.exit(1)
+
+    from .config import default_worker_name
+    suggested = default_worker_name()
+    worker_name = input(f"  Worker name [{suggested}]: ").strip() or suggested
+
+    # --- Connection mode: streaming is the only live path (legacy /v2 retired) ---
+    print()
+    print("  Connection: ⚡ streaming (WebSocket) — recommended & default.")
+    legacy = input("  Use legacy HTTP polling instead? [y/N]: ").strip().lower() == "y"
+    streaming = not legacy
+
+    # --- Assemble config ---
+    first_b = backends[0]
+    config = {
+        "GRID_API_KEY": api_key,
+        "GRID_WORKER_NAME": worker_name,
+        "GRID_STREAMING": "true" if streaming else "false",
+        "GRID_BACKENDS": json.dumps(backends),
+        # Back-compat single-backend vars (also satisfy is_configured()).
+        "BACKEND_TYPE": first_b["type"],
+        "MODEL_NAME": first_b["model"],
+        "GRID_MODEL_NAME": first_b["grid_model"],
+    }
+    if first_b["type"] == "ollama":
+        config["OLLAMA_URL"] = first_b["url"]
+    else:
+        config["OPENAI_URL"] = first_b["url"]
+    if first_b["api_key"]:
+        config["OPENAI_API_KEY"] = first_b["api_key"]
+
+    # --- Summary ---
+    print()
+    print("  ── Summary " + "─" * 38)
+    print(f"  Worker:  {worker_name}   ({'streaming' if streaming else 'polling'})")
+    for i, b in enumerate(backends, 1):
+        print(f"    {i}. {b['model']:<28} → {b['grid_model']} (x{b['concurrency']})")
+    print()
+
     write_env(config)
-    print(f"  Config saved to {ENV_PATH}")
+    print(f"  ✓ Saved {len(backends)} backend(s) to {ENV_PATH}")
 
     # --- Offer service installation ---
     print()
-    print("  Install as system service?")
-    print("    [1] Yes — start on boot, run in background (Recommended)")
-    print("    [2] No — run in foreground now")
-    choice = input("  [1]: ").strip()
-    if choice != "2":
+    print("  Install as a system service (start on boot, run in background)?")
+    if input("  [Y/n]: ").strip().lower() != "n":
         print()
         service.install(verbose=True)
         config["_service_installed"] = True
@@ -269,14 +323,20 @@ def run(args):
             print("\n  Shutting down...")
         return
 
-    # Non-P2P modes use asyncio
+    # Streaming: run the multi-backend supervisor so EVERY backend in
+    # GRID_BACKENDS is served (not just the first). Falls back to the single
+    # TextWorker poll loop only when streaming is off (legacy).
     if Settings.GRID_STREAMING:
-        from .ws_client import StreamingWorker
-        worker = StreamingWorker()
-        print("  ⚡ Streaming mode — WebSocket connection")
-    else:
-        from .worker import TextWorker
-        worker = TextWorker()
+        from .ws_client import run_workers
+        print("  ⚡ Streaming mode — WebSocket connection(s)")
+        try:
+            asyncio.run(run_workers())
+        except KeyboardInterrupt:
+            print("\n  Shutting down...")
+        return
+
+    from .worker import TextWorker
+    worker = TextWorker()
 
     async def _run():
         try:
