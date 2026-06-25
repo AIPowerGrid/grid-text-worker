@@ -53,7 +53,7 @@ result. Ships as a single PyInstaller binary with a browser setup wizard + dashb
 
 ## Local Contracts
 
-- **Inherit org engineering standards:** `/Users/j/fix-axios-vuln/aipg-documentation/engineering-standards/`
+- **Inherit org engineering standards:** `aipg-documentation/engineering-standards/`
   (core + `git` + the matching language file — `python.md`).
 - **This is a CLIENT of the grid, not the grid.** It speaks the grid's worker protocols only;
   it never owns coordinator state. The grid's contracts live in `grid-core/grid_api`.
