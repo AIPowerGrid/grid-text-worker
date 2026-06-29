@@ -146,10 +146,32 @@ class Backend:
     grid_model_name: str  # name advertised to the grid
     concurrency: int = 1
     schedule: str = ""    # optional per-backend GRID_SCHEDULE JSON
+    modalities: list[str] = field(default_factory=lambda: ["text"])  # input modalities advertised to the grid
 
 
 def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-")[:24] or "model"
+
+
+def _parse_modalities(s: dict) -> list[str]:
+    """Input modalities this backend's model accepts, DECLARED explicitly.
+
+    Auto-detection isn't reliable: vLLM exposes no modality field on /v1/models
+    and silently ignores image parts on a text model (returns 200), so probing
+    gives false positives. The operator knows their model, so they declare it:
+    `"modalities": ["text","image"]` or the shorthand `"vision": true`. Text is
+    always included. (A validator can later VERIFY this claim and revoke a lie.)
+    """
+    mods = s.get("modalities")
+    if isinstance(mods, list) and mods:
+        out = [m for m in mods if m in ("text", "image", "video")]
+    elif s.get("vision"):
+        out = ["text", "image"]
+    else:
+        out = ["text"]
+    if "text" not in out:
+        out = ["text"] + out
+    return out
 
 
 def load_backends() -> list[Backend]:
@@ -181,6 +203,7 @@ def load_backends() -> list[Backend]:
                 grid_model_name=grid_model,
                 concurrency=int(s.get("concurrency", 1)),
                 schedule=s.get("schedule", ""),
+                modalities=_parse_modalities(s),
             ))
         if out:
             return out

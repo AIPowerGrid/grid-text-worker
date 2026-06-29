@@ -135,6 +135,10 @@ class StreamingWorker:
         self.ws = None
         self.worker_id = None
         self.api_formats = ["openai-chat"]
+        # Input modalities the operator declared for this backend's model
+        # (default text-only). Advertised at registration so the grid can mark
+        # the model image-capable and the chat UI enables image upload.
+        self.modalities: list[str] = list(getattr(spec, "modalities", None) or ["text"])
         self._signer = get_signer()
         self.signer_address = self._signer.address if self._signer else ""
         self._reconnect_delay = 1
@@ -332,6 +336,7 @@ class StreamingWorker:
             "max_length": Settings.MAX_LENGTH,
             "max_context_length": getattr(self, "max_context", None) or Settings.MAX_CONTEXT_LENGTH,
             "api_formats": self.api_formats,
+            "modalities": self.modalities,
             "signer_address": self.signer_address,
             "bridge_agent": BRIDGE_AGENT,
         }))
