@@ -32,15 +32,16 @@ concrete detail in children. Delete stale notes instead of explaining history.
 
 ---
 
-# grid-text-worker — turn-key text inference worker
+# grid-inference-worker — turn-key text inference worker
 
 ## Purpose
 
 The end-user worker that earns on AI Power Grid. It bridges the grid coordinator to a local
 OpenAI-compatible inference backend (Ollama / vLLM / SGLang / LMDeploy / LM Studio /
-KoboldCpp): pops text-generation jobs, runs them through the backend, and returns the
-result. Ships as a single PyInstaller binary with a browser setup wizard + dashboard at
-`http://localhost:7861`. Entry point: `inference_worker/cli:main`.
+KoboldCpp): receives pushed text-generation jobs over a WebSocket, runs them through the
+backend, and streams the result back. Ships as a single PyInstaller binary with a browser
+setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-inference-worker`
+(entry point `inference_worker/cli:main`).
 
 ## Ownership
 
@@ -57,22 +58,27 @@ result. Ships as a single PyInstaller binary with a browser setup wizard + dashb
   (core + `git` + the matching language file — `python.md`).
 - **This is a CLIENT of the grid, not the grid.** It speaks the grid's worker protocols only;
   it never owns coordinator state. The grid's contracts live in `grid-core/grid_api`.
-- **Two transports, same backend bridge:** legacy HTTP polling (`/v2/generate/text/pop` +
-  `/submit`, default) and WebSocket streaming (`/v1/workers/ws`, `GRID_STREAMING=true`).
-  Keep both in sync when the job shape changes. P2P (`P2P_ENABLED`) is experimental scaffolding.
+- **WebSocket is the ONLY transport and the default.** A persistent WebSocket to
+  `/v1/workers/ws` (`GRID_STREAMING` defaults `true`) receives pushed jobs and streams tokens
+  back. The legacy HTTP `/v2` poll queue is RETIRED server-side; `api_client.py` is a stub that
+  raises `RuntimeError` on use, so any stale poll code path fails loud. P2P (`P2P_ENABLED`) is
+  experimental scaffolding.
+- **Multi-backend supervisor:** `GRID_BACKENDS` fans out one worker per configured backend from
+  a single process. Declared `input_modalities` (e.g. vision) flow to the grid `/v1/models`
+  surface; the WS carries `cancel` frames that abort an in-flight backend request.
 - **Config is env-only** via `inference_worker/config.py:Settings`; never read env elsewhere.
 - Run from `grid-core`'s prod tree on servers; this repo produces the distributable binary.
 
 ## Work Guidance
 
 - New config → add to `config.Settings`, surface in the web setup/settings pages and README env table.
-- Backend requests are OpenAI `/chat/completions`; route grid I/O through `api_client` (HTTP)
-  or `ws_client` (WS), never ad-hoc.
+- Backend requests are OpenAI `/chat/completions`; route grid I/O through `ws_client` (WS),
+  never ad-hoc. `api_client` (the retired HTTP poll client) is a stub — do not revive it.
 
 ## Verification
 
 - `pip install -e ".[test]"` then `pytest` (smoke tests under `tests/`).
-- `grid-text-worker --no-gui` should boot the dashboard at `http://localhost:7861`.
+- `grid-inference-worker --no-gui` should boot the dashboard at `http://localhost:7861`.
 
 ## Child DOX Index
 
