@@ -142,8 +142,8 @@ class StreamingWorker:
         # model image-capable and the chat UI enables image upload. Either the
         # operator declared them, or we auto-detect at connect() (see
         # _detect_vision). Default text-only until then.
-        self.modalities: list[str] = list(getattr(spec, "modalities", None) or ["text"])
-        self.modalities_declared: bool = bool(getattr(spec, "modalities_declared", False))
+        self.modalities: list[str] = spec.modalities
+        self.modalities_declared: bool = spec.modalities_declared
         self._signer = get_signer()
         self.signer_address = self._signer.address if self._signer else ""
         self._reconnect_delay = 1
