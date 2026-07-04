@@ -107,8 +107,9 @@ class Settings:
     # Leave both empty to keep auto-detecting. For the GRID_BACKENDS JSON config,
     # use the per-backend "modalities"/"vision" keys instead.
     MODALITIES = os.getenv("GRID_MODALITIES", "").strip()
-    VISION = os.getenv("GRID_VISION", "").lower() in ("1", "true", "yes", "on")
-
+    VISION = os.getenv("GRID_VISION", "").lower()
+    if VISION in ("1", "true", "yes", "on"): VISION = True
+    
     # Streaming (WebSocket /v1) is the only live mode — the legacy /v2 poll
     # queue is retired. Defaults ON; set "false" only knowingly (the worker
     # refuses rather than poll the dead /v2 endpoint).
@@ -180,15 +181,11 @@ def _parse_modalities(s: dict) -> list[str]:
     `"modalities": ["text","image"]` or the shorthand `"vision": true`. Text is
     always included. (A validator can later VERIFY this claim and revoke a lie.)
     """
-    mods = s.get("modalities")
-    if isinstance(mods, list) and mods:
-        out = [m for m in mods if m in ("text", "image", "video")]
-    elif s.get("vision"):
-        out = ["text", "image"]
-    else:
-        out = ["text"]
+    out = s.get("modalities")
     if "text" not in out:
-        out = ["text"] + out
+        out.append("text")
+    if s.get("vision"):
+        out.append("image")
     return out
 
 
@@ -239,6 +236,6 @@ def load_backends() -> list[Backend]:
         schedule=Settings.GRID_SCHEDULE,
         # Honor GRID_MODALITIES / GRID_VISION as an explicit override; otherwise
         # default to text-only and let connect() auto-detect.
-        modalities=_parse_modalities({"modalities": _env_mods, "vision": Settings.VISION}),
         modalities_declared=bool(_env_mods or Settings.VISION),
+        modalities=_parse_modalities({"modalities": _env_mods, "vision": Settings.VISION}),
     )]
