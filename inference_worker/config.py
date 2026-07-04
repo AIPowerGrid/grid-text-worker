@@ -114,6 +114,14 @@ class Settings:
     # refuses rather than poll the dead /v2 endpoint).
     GRID_STREAMING = os.getenv("GRID_STREAMING", "true").lower() == "true"
     GRID_STREAMING_URL = os.getenv("GRID_STREAMING_URL", "")  # Override WS URL (auto-derived from GRID_API_URL if empty)
+    # WS TLS: the recommended WS endpoint (wss://ws.aipowergrid.io) is DNS-only
+    # (bypasses Cloudflare, which resets long-lived WS) and serves the Cloudflare
+    # Origin cert. That cert chains to the Cloudflare Origin CA, bundled at
+    # certs/cloudflare_origin_root.pem and trusted automatically — no Let's
+    # Encrypt, no per-operator setup. Override the CA or (last resort) skip verify.
+    # Public endpoints (api.*) keep using the system CA store.
+    GRID_WS_CA = os.getenv("GRID_WS_CA", "")  # extra CA bundle path (default: bundled CF Origin root)
+    GRID_WS_INSECURE = os.getenv("GRID_WS_INSECURE", "false").lower() in ("1", "true", "yes")
 
     # P2P mode — connect via libp2p gossipsub instead of WebSocket
     P2P_ENABLED = os.getenv("P2P_ENABLED", "false").lower() == "true"

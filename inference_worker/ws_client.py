@@ -13,6 +13,8 @@ Enable with GRID_STREAMING=true in your .env.
 import asyncio
 import json
 import logging
+import os
+import ssl
 import time
 from datetime import datetime
 
@@ -286,7 +288,19 @@ class StreamingWorker:
     @property
     def ws_url(self) -> str:
         """Build WebSocket URL from the Grid API URL."""
-        api_url = Settings.GRID_STREAMING_URL or Settings.GRID_API_URL
+        if Settings.GRID_STREAMING_URL:
+            api_url = Settings.GRID_STREAMING_URL
+        else:
+            # No explicit streaming URL: derive it from the API URL, and auto-map
+            # an `api.*` host to `ws.*`. The public grid serves the persistent
+            # worker WebSocket on a DNS-only `ws.` host (bypasses Cloudflare, which
+            # resets long-lived WS). So operators configure ONE url (or the default)
+            # — no separate streaming URL. Self-hosters override via GRID_STREAMING_URL.
+            api_url = Settings.GRID_API_URL
+            for scheme in ("https://", "http://"):
+                if api_url.startswith(scheme + "api."):
+                    api_url = scheme + "ws." + api_url[len(scheme) + 4:]
+                    break
         # Convert http(s) to ws(s)
         ws_url = api_url.replace("https://", "wss://").replace("http://", "ws://")
         # Strip /api suffix if present
@@ -294,6 +308,32 @@ class StreamingWorker:
         if ws_url.endswith("/api"):
             ws_url = ws_url[:-4]
         return f"{ws_url}/v1/workers/ws"
+
+    def _ws_ssl(self):
+        """SSL context for the WS connection.
+
+        For wss://, trust the system CA store PLUS the bundled Cloudflare Origin
+        CA, so the DNS-only ws.aipowergrid.io endpoint (which serves the CF Origin
+        cert to bypass Cloudflare's WS resets) verifies without Let's Encrypt.
+        Returns None for plain ws:// (no TLS). GRID_WS_CA overrides the bundle;
+        GRID_WS_INSECURE disables verification (last resort only).
+        """
+        if not self.ws_url.startswith("wss://"):
+            return None
+        ctx = ssl.create_default_context()
+        ca = Settings.GRID_WS_CA or os.path.join(
+            os.path.dirname(__file__), "certs", "cloudflare_origin_root.pem"
+        )
+        try:
+            if ca and os.path.exists(ca):
+                ctx.load_verify_locations(ca)
+        except Exception as e:
+            logger.warning(f"could not load WS CA '{ca}': {e}")
+        if Settings.GRID_WS_INSECURE:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            logger.warning("GRID_WS_INSECURE=1 — WS certificate verification DISABLED")
+        return ctx
 
     async def connect(self):
         """Connect to the Grid Streaming API via WebSocket."""
@@ -334,6 +374,7 @@ class StreamingWorker:
 
         self.ws = await websockets.connect(
             self.ws_url,
+            ssl=self._ws_ssl(),
             ping_interval=30,
             ping_timeout=10,
             close_timeout=5,

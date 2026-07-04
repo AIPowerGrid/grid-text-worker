@@ -30,4 +30,4 @@ grid-inference-worker = "inference_worker.cli:main"
 include = ["inference_worker*"]
 
 [tool.setuptools.package-data]
-inference_worker = ["web/templates/**/*.html", "web/static/**/*"]
+inference_worker = ["web/templates/**/*.html", "web/static/**/*", "certs/*.pem"]
