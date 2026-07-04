@@ -236,6 +236,6 @@ def load_backends() -> list[Backend]:
         schedule=Settings.GRID_SCHEDULE,
         # Honor GRID_MODALITIES / GRID_VISION as an explicit override; otherwise
         # default to text-only and let connect() auto-detect.
-        modalities_declared=bool(_env_mods or Settings.VISION)),
+        modalities_declared=bool(_env_mods or Settings.VISION),
         modalities=_parse_modalities({"modalities": _env_mods, "vision": Settings.VISION}),
     )]
