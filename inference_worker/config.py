@@ -108,7 +108,7 @@ class Settings:
     # use the per-backend "modalities"/"vision" keys instead.
     MODALITIES = os.getenv("GRID_MODALITIES", "").strip()
     VISION = os.getenv("GRID_VISION", "").lower() in ("1", "true", "yes", "on")
-
+    
     # Streaming (WebSocket /v1) is the only live mode — the legacy /v2 poll
     # queue is retired. Defaults ON; set "false" only knowingly (the worker
     # refuses rather than poll the dead /v2 endpoint).
@@ -235,6 +235,6 @@ def load_backends() -> list[Backend]:
         schedule=Settings.GRID_SCHEDULE,
         # Honor GRID_MODALITIES / GRID_VISION as an explicit override; otherwise
         # default to text-only and let connect() auto-detect.
-        modalities_declared=bool(_env_mods or Settings.VISION),
+        modalities_declared=bool(_env_mods or Settings.VISION or (os.getenv("GRID_VISION", "").lower() not in ("1", "true", "yes", "on"))),
         modalities=_parse_modalities({"modalities": _env_mods, "vision": Settings.VISION}),
     )]
