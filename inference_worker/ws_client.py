@@ -13,12 +13,15 @@ Enable with GRID_STREAMING=true in your .env.
 import asyncio
 import json
 import logging
+import os
+import ssl
 import time
 from datetime import datetime
 
 import httpx
 import websockets
 
+from . import vision_probe
 from .config import Settings
 
 logger = logging.getLogger(__name__)
@@ -135,6 +138,12 @@ class StreamingWorker:
         self.ws = None
         self.worker_id = None
         self.api_formats = ["openai-chat"]
+        # Input modalities advertised at registration so the grid can mark the
+        # model image-capable and the chat UI enables image upload. Either the
+        # operator declared them, or we auto-detect at connect() (see
+        # _detect_vision). Default text-only until then.
+        self.modalities: list[str] = list(getattr(spec, "modalities", None) or ["text"])
+        self.modalities_declared: bool = bool(getattr(spec, "modalities_declared", False))
         self._signer = get_signer()
         self.signer_address = self._signer.address if self._signer else ""
         self._reconnect_delay = 1
@@ -178,28 +187,51 @@ class StreamingWorker:
         return self._endpoint_url("chat/completions")
 
     async def _probe_formats(self) -> list:
-        """Detect which API formats the backend natively serves.
+        """Detect which API formats the backend can ACTUALLY serve by sending a
+        minimal valid request in each shape and keeping only those that return a
+        usable 200.
 
-        The grid routes /v1/messages and /v1/responses only to workers whose
-        engine actually exposes them — so we probe each candidate endpoint and
-        advertise only what answers. A 404 means the route doesn't exist (e.g.
-        vLLM has no /v1/messages); any other status means it's there. We always
-        keep openai-chat (our primary generation path)."""
-        formats = ["openai-chat"]
-        for fmt in ("openai-responses", "anthropic"):
+        The old check advertised any non-404 — but vLLM route-REJECTS unknown
+        shapes with 400 (e.g. /v1/messages), so the grid would route Anthropic /
+        Responses traffic to a worker that can't serve it. We now require a real
+        200, per format, so a broken-for-one-shape backend drops just that shape.
+        openai-chat is the primary path: this doubles as a generation pre-flight
+        (200 + actual output) — connect() refuses to register without it, so a
+        backend that can't produce tokens never advertises a model."""
+        model = self.spec.model_name
+        bodies = {
+            "openai-chat": {"model": model, "messages": [{"role": "user", "content": "hi"}],
+                            "max_tokens": 8, "stream": False},
+            "openai-responses": {"model": model, "input": "hi", "max_output_tokens": 8},
+            "anthropic": {"model": model, "messages": [{"role": "user", "content": "hi"}],
+                          "max_tokens": 8},
+        }
+        formats = []
+        for fmt in ("openai-chat", "openai-responses", "anthropic"):
             suffix = FORMAT_SUFFIX[fmt]
             try:
                 r = await self.backend.post(
-                    self._endpoint_url(suffix), json={}, headers=self._get_auth_headers(), timeout=5
+                    self._endpoint_url(suffix), json=bodies[fmt],
+                    headers=self._get_auth_headers(), timeout=30,
                 )
             except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPError) as e:
                 logger.info(f"Backend does not serve {fmt} ({suffix}): {type(e).__name__}")
                 continue
-            if r.status_code != 404:
-                formats.append(fmt)
-                logger.info(f"Backend serves {fmt} via /{suffix} (probe HTTP {r.status_code})")
-            else:
-                logger.info(f"Backend has no {fmt} endpoint (/{suffix} -> 404)")
+            if r.status_code != 200:
+                logger.info(f"Backend does NOT serve {fmt} (/{suffix} -> HTTP {r.status_code})")
+                continue
+            if fmt == "openai-chat":
+                try:
+                    msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+                    produced = bool(msg.get("content") or msg.get("reasoning_content")
+                                    or msg.get("reasoning") or msg.get("tool_calls"))
+                except Exception:
+                    produced = False
+                if not produced:
+                    logger.warning("Backend openai-chat probe returned 200 but no output — not advertising")
+                    continue
+            formats.append(fmt)
+            logger.info(f"Backend serves {fmt} via /{suffix} (200)")
         return formats
 
     def _get_auth_headers(self) -> dict:
@@ -256,7 +288,19 @@ class StreamingWorker:
     @property
     def ws_url(self) -> str:
         """Build WebSocket URL from the Grid API URL."""
-        api_url = Settings.GRID_STREAMING_URL or Settings.GRID_API_URL
+        if Settings.GRID_STREAMING_URL:
+            api_url = Settings.GRID_STREAMING_URL
+        else:
+            # No explicit streaming URL: derive it from the API URL, and auto-map
+            # an `api.*` host to `ws.*`. The public grid serves the persistent
+            # worker WebSocket on a DNS-only `ws.` host (bypasses Cloudflare, which
+            # resets long-lived WS). So operators configure ONE url (or the default)
+            # — no separate streaming URL. Self-hosters override via GRID_STREAMING_URL.
+            api_url = Settings.GRID_API_URL
+            for scheme in ("https://", "http://"):
+                if api_url.startswith(scheme + "api."):
+                    api_url = scheme + "ws." + api_url[len(scheme) + 4:]
+                    break
         # Convert http(s) to ws(s)
         ws_url = api_url.replace("https://", "wss://").replace("http://", "ws://")
         # Strip /api suffix if present
@@ -264,6 +308,32 @@ class StreamingWorker:
         if ws_url.endswith("/api"):
             ws_url = ws_url[:-4]
         return f"{ws_url}/v1/workers/ws"
+
+    def _ws_ssl(self):
+        """SSL context for the WS connection.
+
+        For wss://, trust the system CA store PLUS the bundled Cloudflare Origin
+        CA, so the DNS-only ws.aipowergrid.io endpoint (which serves the CF Origin
+        cert to bypass Cloudflare's WS resets) verifies without Let's Encrypt.
+        Returns None for plain ws:// (no TLS). GRID_WS_CA overrides the bundle;
+        GRID_WS_INSECURE disables verification (last resort only).
+        """
+        if not self.ws_url.startswith("wss://"):
+            return None
+        ctx = ssl.create_default_context()
+        ca = Settings.GRID_WS_CA or os.path.join(
+            os.path.dirname(__file__), "certs", "cloudflare_origin_root.pem"
+        )
+        try:
+            if ca and os.path.exists(ca):
+                ctx.load_verify_locations(ca)
+        except Exception as e:
+            logger.warning(f"could not load WS CA '{ca}': {e}")
+        if Settings.GRID_WS_INSECURE:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            logger.warning("GRID_WS_INSECURE=1 — WS certificate verification DISABLED")
+        return ctx
 
     async def connect(self):
         """Connect to the Grid Streaming API via WebSocket."""
@@ -278,11 +348,24 @@ class StreamingWorker:
         # Detect which API formats the backend exposes so the grid can route
         # /v1/messages and /v1/responses to us only if we can actually serve them.
         self.api_formats = await self._probe_formats()
+        if "openai-chat" not in self.api_formats:
+            raise BackendUnavailable(
+                f"Backend at {self.spec.url} failed the openai-chat generation "
+                "probe — not registering (would only produce job failures)"
+            )
 
         # Advertise the backend's REAL context window (auto-detected per model)
         # instead of a static env guess, so the grid + clients know each model's
         # true limit. Falls back to the configured default if detection fails.
         self.max_context = await self._detect_context()
+
+        # Auto-detect image input unless the operator declared modalities/vision.
+        # Reliable across engines (ollama capabilities + nonce-image probe); see
+        # _detect_vision. Declaration always wins.
+        if not self.modalities_declared:
+            self.modalities = (
+                ["text", "image"] if await self._detect_vision() else ["text"]
+            )
 
         logger.info(
             f"Connecting to {self.ws_url}... (formats: {self.api_formats}, "
@@ -291,6 +374,7 @@ class StreamingWorker:
 
         self.ws = await websockets.connect(
             self.ws_url,
+            ssl=self._ws_ssl(),
             ping_interval=30,
             ping_timeout=10,
             close_timeout=5,
@@ -304,6 +388,7 @@ class StreamingWorker:
             "max_length": Settings.MAX_LENGTH,
             "max_context_length": getattr(self, "max_context", None) or Settings.MAX_CONTEXT_LENGTH,
             "api_formats": self.api_formats,
+            "modalities": self.modalities,
             "signer_address": self.signer_address,
             "bridge_agent": BRIDGE_AGENT,
         }))
@@ -399,6 +484,70 @@ class StreamingWorker:
         except Exception:
             pass  # WS may already be gone; the grid's disconnect path requeues anyway
 
+    async def _detect_vision(self) -> bool:
+        """Return True if this backend's model accepts image input.
+
+        Two reliable signals (validated against moondream + text models):
+          * ollama: GET /api/show -> capabilities includes "vision" (authoritative,
+            free, no inference).
+          * everything else (vLLM/sglang/llama.cpp): a nonce-in-image probe. A
+            blind text model can't reproduce a random nonce it never saw, so
+            reading >=3/4 digits proves genuine image input. vLLM silently
+            200s/ignores and ollama text models 400-reject — neither produces the
+            nonce, so both read as text-only with ~0 false positives.
+        Any error -> text-only (fail safe: never falsely claim vision).
+        """
+        try:
+            if self.spec.backend_type == "ollama":
+                base = self.spec.url.rstrip("/")
+                if base.endswith("/v1"):
+                    base = base[:-3].rstrip("/")  # /api/show lives at the host root
+                r = await self.backend.post(
+                    f"{base}/api/show", json={"model": self.model_name}
+                )
+                if r.status_code == 200:
+                    vision = "vision" in (r.json().get("capabilities") or [])
+                    logger.info(
+                        f"🔎 vision detect (ollama caps) {self.grid_model_name}: {vision}"
+                    )
+                    return vision
+                # /api/show unavailable — fall through to the universal probe.
+
+            nonce = vision_probe.make_nonce()
+            payload = {
+                "model": self.model_name,
+                "max_tokens": 200,
+                "temperature": 0,
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": "Reply with EXACTLY the 4 digits in the image, or NO_IMAGE if you received no image."},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64," + vision_probe.render_nonce_png_b64(nonce)}},
+                ]}],
+            }
+            resp = await self.backend.post(
+                self._get_completions_url(), json=payload, headers=self._get_auth_headers()
+            )
+            if resp.status_code != 200:
+                logger.info(
+                    f"🔎 vision detect (probe) {self.grid_model_name}: text-only "
+                    f"(HTTP {resp.status_code})"
+                )
+                return False
+            msg = (resp.json().get("choices") or [{}])[0].get("message", {})
+            answer = (msg.get("content") or "") + " " + (msg.get("reasoning_content") or "")
+            match = vision_probe.nonce_match(answer, nonce)
+            vision = match >= 3
+            logger.info(
+                f"🔎 vision detect (nonce probe) {self.grid_model_name}: "
+                f"{'VISION' if vision else 'text-only'} ({match}/{len(nonce)})"
+            )
+            return vision
+        except Exception as e:
+            logger.info(
+                f"🔎 vision detect {self.grid_model_name} failed "
+                f"({type(e).__name__}); assuming text-only"
+            )
+            return False
+
     def _build_backend_request(self, job_id: str, payload: dict) -> tuple[dict, bool]:
         """Build the OpenAI request we send to the local backend.
 
@@ -449,6 +598,34 @@ class StreamingWorker:
             openai_payload.setdefault("reasoning_effort", Settings.REASONING_EFFORT)
         return openai_payload, faithful
 
+    def _start_cancel_watcher(self, job_id: str, cancel_event: asyncio.Event):
+        """Watch the WS for a `cancel` frame WHILE we stream a job back.
+
+        During generation the job coroutine only SENDS (tokens), so a second
+        coroutine can safely RECV here without colliding (full-duplex; the only
+        other reader, the message loop, is parked awaiting this job). When the
+        grid forwards a client cancel we set `cancel_event`; the streaming loop
+        breaks, which closes our HTTP connection to the backend and makes the
+        inference engine (vLLM/sglang/Ollama) abort the request and free the GPU.
+
+        The caller MUST cancel + await this task before reading the job's ack, so
+        the watcher never steals the ack frame."""
+        async def _watch():
+            try:
+                while not cancel_event.is_set():
+                    raw = await self.ws.recv()
+                    m = json.loads(raw)
+                    if m.get("type") == "cancel" and m.get("id") == job_id:
+                        logger.info(f"🛑 cancel for {job_id[:8]} — aborting backend request")
+                        cancel_event.set()
+                        return
+                    # The grid shouldn't send anything else mid-job; ignore it.
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return  # any WS issue is surfaced on the main job path
+        return asyncio.create_task(_watch())
+
     async def _handle_job(self, job: dict):
         """Process a job: stream inference deltas back to the grid faithfully."""
         job_id = job["id"]
@@ -479,6 +656,9 @@ class StreamingWorker:
         last_finish = None
         start_time = time.time()
 
+        cancelled = False
+        cancel_event = asyncio.Event()
+        watcher = self._start_cancel_watcher(job_id, cancel_event)
         try:
             # Stream from the inference engine → relay deltas to the grid.
             async with self.backend.stream("POST", url, json=openai_payload, headers=headers) as response:
@@ -508,6 +688,12 @@ class StreamingWorker:
                     raise BackendUnavailable(f"backend HTTP {response.status_code}")
 
                 async for line in response.aiter_lines():
+                    if cancel_event.is_set():
+                        # Client cancelled — stop pulling tokens. Leaving the
+                        # `async with` closes the connection to the backend, which
+                        # aborts the running request and frees the GPU.
+                        cancelled = True
+                        break
                     if not line.startswith("data: "):
                         continue
                     data_str = line[6:]
@@ -535,6 +721,13 @@ class StreamingWorker:
                     # Relay the RAW delta untouched, but only if it carries
                     # something meaningful — skip the bare {"role":"assistant"}
                     # opener (the grid emits its own single role chunk).
+                    # Some vLLM reasoning parsers stream the field as `reasoning`
+                    # rather than the `reasoning_content` convention — normalize so
+                    # the meaningful-check, accumulation, and downstream all see one
+                    # name (else reasoning-only models look like 0-token failures).
+                    if delta.get("reasoning") and not delta.get("reasoning_content"):
+                        delta["reasoning_content"] = delta.pop("reasoning")
+
                     meaningful = any(
                         delta.get(k) for k in ("content", "reasoning_content", "tool_calls", "refusal")
                     )
@@ -558,24 +751,37 @@ class StreamingWorker:
             logger.error(f"Backend unreachable mid-generation: {e}")
             await self._fail_job(job_id, f"backend unreachable: {type(e).__name__}")
             raise BackendUnavailable(str(e)) from e
+        finally:
+            # Stop the cancel watcher BEFORE the ack recv() below so it can't steal
+            # the ack frame.
+            watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
 
         # A 200 that yielded zero deltas is a silent backend failure (crashed on
         # load, empty stream). Report it as a failure so the grid retries on a
-        # healthy worker instead of handing the client a blank reply.
-        if token_count == 0 and not full_text and not full_reasoning:
+        # healthy worker — UNLESS the client cancelled, where stopping with little
+        # or no output is expected, not a fault.
+        if token_count == 0 and not full_text and not full_reasoning and not cancelled:
             logger.error(f"Backend produced 0 tokens for job {job_id} — reporting failure")
             await self._fail_job(job_id, "backend produced no output")
             return
 
         # Send completion with the assembled text, reasoning, and authoritative usage.
+        # On cancel we still send a `done` carrying the partial output; the grid
+        # settles the partial (pay-for-work) instead of striking us.
         gen_time = time.time() - start_time
         done_msg = {
             "type": "done",
             "id": job_id,
             "full_text": full_text,
             "full_reasoning": full_reasoning,
-            "finish_reason": last_finish or "stop",
+            "finish_reason": "cancelled" if cancelled else (last_finish or "stop"),
         }
+        if cancelled:
+            done_msg["cancelled"] = True
         if usage:
             done_msg["usage"] = usage
         receipt = self._sign_receipt(job_id, full_text)
@@ -621,6 +827,9 @@ class StreamingWorker:
 
         logger.info(f"📥 Raw job {job_id[:8]} | format={api_format} | stream={stream}")
 
+        cancelled = False
+        cancel_event = asyncio.Event()
+        watcher = self._start_cancel_watcher(job_id, cancel_event)
         try:
             if stream:
                 cur_event = None
@@ -638,6 +847,11 @@ class StreamingWorker:
                         raise BackendUnavailable(f"backend HTTP {resp.status_code}")
 
                     async for line in resp.aiter_lines():
+                        if cancel_event.is_set():
+                            # Client cancelled — closing the stream aborts the
+                            # backend request and frees the GPU.
+                            cancelled = True
+                            break
                         if not line:
                             continue
                         if line.startswith("event:"):
@@ -654,7 +868,10 @@ class StreamingWorker:
                                 {"type": "raw", "id": job_id, "event": cur_event, "data": data}
                             ))
                             cur_event = None
-                await self.ws.send(json.dumps({"type": "done", "id": job_id, "usage": usage}))
+                done_raw = {"type": "done", "id": job_id, "usage": usage}
+                if cancelled:
+                    done_raw["cancelled"] = True
+                await self.ws.send(json.dumps(done_raw))
             else:
                 resp = await self.backend.post(url, json=request, headers=headers)
                 if resp.status_code != 200:
@@ -675,6 +892,13 @@ class StreamingWorker:
             logger.error(f"Backend unreachable mid-raw-generation: {e}")
             await self._fail_job(job_id, f"backend unreachable: {type(e).__name__}")
             raise BackendUnavailable(str(e)) from e
+        finally:
+            # Stop the cancel watcher before the ack recv() so it can't steal it.
+            watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
 
         # Wait for the den ack.
         try:

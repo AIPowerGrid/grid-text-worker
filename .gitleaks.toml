@@ -1,0 +1,59 @@
+# gitleaks config for AIPG OSS release scanning.
+# Extends gitleaks' default ruleset (API keys, AWS, private keys, JWTs, ...) with
+# AIPG-specific leaks that the defaults DON'T catch: internal infra, local dev
+# paths, R2 buckets, on-chain addresses. Use with:
+#   gitleaks detect --source <repo> --config .gitleaks.toml --redact
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "aipg-internal-ip"
+description = "Internal datacenter IP (Proxmox/LXC range)"
+regex = '''\b(172\.(3[01])|10\.)\.\d{1,3}\.\d{1,3}\b'''
+tags = ["aipg", "infra"]
+
+[[rules]]
+id = "aipg-local-dev-path"
+description = "Local developer absolute path (leaks username / machine layout)"
+regex = '''/Users/[a-z0-9._-]+/'''
+tags = ["aipg", "infra"]
+
+[[rules]]
+id = "aipg-r2-bucket"
+description = "Cloudflare R2 / internal bucket names"
+regex = '''\b(aipgcoregen|aipg-transient|aipgcore[a-z0-9-]*)\b'''
+tags = ["aipg", "infra"]
+
+[[rules]]
+id = "aipg-eth-private-key"
+description = "EVM private key (64 hex, optionally 0x)"
+regex = '''\b(0x)?[a-fA-F0-9]{64}\b'''
+tags = ["aipg", "wallet"]
+# Hex-64 is also sha256 hashes / git oids → high false positives. Treated as a
+# REVIEW signal, not an auto-block; the human triages contracts/worker output.
+[rules.allowlist]
+regexes = ['''[a-f0-9]{64}''']  # lowercase-only 64hex (hashes) are usually benign
+paths = ['''(?i)(test|fixture|mock|\.lock|package-lock|yarn\.lock|poetry\.lock)''']
+
+[[rules]]
+id = "aipg-mnemonic"
+description = "BIP-39 mnemonic / seed phrase markers"
+regex = '''(?i)(mnemonic|seed[\s_-]?phrase)\s*[:=]\s*["']?(\w+\s+){11,}'''
+tags = ["aipg", "wallet"]
+
+# Global allowlist: example/template/sample env + docs placeholders never block.
+[allowlist]
+description = "Non-secret placeholders, lockfiles, and the scanner's own config"
+paths = [
+  '''(?i)\.env\.(example|template|sample)$''',
+  '''(?i)(^|/)(examples?|samples?)/''',
+  '''(?i)\.(lock)$''',
+  '''(?i)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Cargo\.lock)$''',
+  # The scanner's own files contain the patterns by definition — never self-flag.
+  '''(?i)\.gitleaks\.toml$''',
+  '''(?i)secret-scan\.ya?ml$''',
+]
+regexes = [
+  '''(?i)(your[-_]?api[-_]?key|example|placeholder|changeme|xxxx+|<[a-z_]+>)''',
+]

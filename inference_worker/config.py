@@ -100,11 +100,28 @@ class Settings:
     # Grid model name (what to advertise to the grid, with domain prefix)
     GRID_MODEL_NAME = os.getenv("GRID_MODEL_NAME", "")
 
+    # Input modalities override (single-backend env config). Set this when your
+    # model is multimodal but auto-detection didn't catch it:
+    #   GRID_MODALITIES=text,image   (explicit list), or
+    #   GRID_VISION=true             (shorthand for text+image)
+    # Leave both empty to keep auto-detecting. For the GRID_BACKENDS JSON config,
+    # use the per-backend "modalities"/"vision" keys instead.
+    MODALITIES = os.getenv("GRID_MODALITIES", "").strip()
+    VISION = os.getenv("GRID_VISION", "").lower() in ("1", "true", "yes", "on")
+
     # Streaming (WebSocket /v1) is the only live mode — the legacy /v2 poll
     # queue is retired. Defaults ON; set "false" only knowingly (the worker
     # refuses rather than poll the dead /v2 endpoint).
     GRID_STREAMING = os.getenv("GRID_STREAMING", "true").lower() == "true"
     GRID_STREAMING_URL = os.getenv("GRID_STREAMING_URL", "")  # Override WS URL (auto-derived from GRID_API_URL if empty)
+    # WS TLS: the recommended WS endpoint (wss://ws.aipowergrid.io) is DNS-only
+    # (bypasses Cloudflare, which resets long-lived WS) and serves the Cloudflare
+    # Origin cert. That cert chains to the Cloudflare Origin CA, bundled at
+    # certs/cloudflare_origin_root.pem and trusted automatically — no Let's
+    # Encrypt, no per-operator setup. Override the CA or (last resort) skip verify.
+    # Public endpoints (api.*) keep using the system CA store.
+    GRID_WS_CA = os.getenv("GRID_WS_CA", "")  # extra CA bundle path (default: bundled CF Origin root)
+    GRID_WS_INSECURE = os.getenv("GRID_WS_INSECURE", "false").lower() in ("1", "true", "yes")
 
     # P2P mode — connect via libp2p gossipsub instead of WebSocket
     P2P_ENABLED = os.getenv("P2P_ENABLED", "false").lower() == "true"
@@ -146,10 +163,33 @@ class Backend:
     grid_model_name: str  # name advertised to the grid
     concurrency: int = 1
     schedule: str = ""    # optional per-backend GRID_SCHEDULE JSON
+    modalities: list[str] = field(default_factory=lambda: ["text"])  # input modalities advertised to the grid
+    modalities_declared: bool = False  # True if the operator set modalities/vision explicitly (skip auto-detect)
 
 
 def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-")[:24] or "model"
+
+
+def _parse_modalities(s: dict) -> list[str]:
+    """Input modalities this backend's model accepts, DECLARED explicitly.
+
+    Auto-detection isn't reliable: vLLM exposes no modality field on /v1/models
+    and silently ignores image parts on a text model (returns 200), so probing
+    gives false positives. The operator knows their model, so they declare it:
+    `"modalities": ["text","image"]` or the shorthand `"vision": true`. Text is
+    always included. (A validator can later VERIFY this claim and revoke a lie.)
+    """
+    mods = s.get("modalities")
+    if isinstance(mods, list) and mods:
+        out = [m for m in mods if m in ("text", "image", "video")]
+    elif s.get("vision"):
+        out = ["text", "image"]
+    else:
+        out = ["text"]
+    if "text" not in out:
+        out = ["text"] + out
+    return out
 
 
 def load_backends() -> list[Backend]:
@@ -181,10 +221,13 @@ def load_backends() -> list[Backend]:
                 grid_model_name=grid_model,
                 concurrency=int(s.get("concurrency", 1)),
                 schedule=s.get("schedule", ""),
+                modalities=_parse_modalities(s),
+                modalities_declared=("modalities" in s or "vision" in s),
             ))
         if out:
             return out
     # Back-compat: a single backend from the classic env vars.
+    _env_mods = [m.strip() for m in Settings.MODALITIES.split(",") if m.strip()]
     return [Backend(
         name=Settings.GRID_WORKER_NAME,
         backend_type=Settings.BACKEND_TYPE,
@@ -194,4 +237,8 @@ def load_backends() -> list[Backend]:
         grid_model_name=Settings.GRID_MODEL_NAME or f"grid/{Settings.MODEL_NAME}",
         concurrency=Settings.MAX_THREADS,
         schedule=Settings.GRID_SCHEDULE,
+        # Honor GRID_MODALITIES / GRID_VISION as an explicit override; otherwise
+        # default to text-only and let connect() auto-detect.
+        modalities=_parse_modalities({"modalities": _env_mods, "vision": Settings.VISION}),
+        modalities_declared=bool(_env_mods or Settings.VISION),
     )]
