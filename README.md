@@ -6,7 +6,7 @@ Turn-key text inference worker for [AI Power Grid](https://aipowergrid.io). Run 
 
 ## Download
 
-Grab the latest binary for your platform from [Releases](https://github.com/AIPowerGrid/grid-inference-worker/releases):
+Grab the latest binary for your platform from [Releases](https://github.com/AIPowerGrid/grid-text-worker/releases):
 
 | Platform | File |
 |----------|------|
@@ -23,7 +23,8 @@ Grab the latest binary for your platform from [Releases](https://github.com/AIPo
 
 No Python or dependencies needed. Just install a backend (Ollama is easiest), run the worker, and follow the wizard.
 
-You'll need a Grid API key — [register here](https://api.aipowergrid.io/register).
+You'll need a Grid API key. Sign in and create one in the
+[developer console](https://console.aipowergrid.io/dashboard/api-key).
 
 Once your worker is running, chat with your model at [aipg.chat](https://aipg.chat) — select your model in the upper selector.
 
@@ -58,7 +59,7 @@ Copy `.env.example` to `.env` and fill in your values, or configure through the 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GRID_API_KEY` | *(required)* | Your Grid API key ([register](https://api.aipowergrid.io/register)) |
+| `GRID_API_KEY` | *(required)* | Your Grid API key ([create one](https://console.aipowergrid.io/dashboard/api-key)) |
 | `MODEL_NAME` | | Model to serve (e.g. `llama3.2:3b`) |
 | `BACKEND_TYPE` | `ollama` | `ollama` or `openai` |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama endpoint |

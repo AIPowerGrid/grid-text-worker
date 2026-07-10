@@ -83,3 +83,6 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 ## Child DOX Index
 
 - [inference_worker/AGENTS.md](inference_worker/AGENTS.md) — the worker package (transport, backend bridge, CLI/GUI, service).
+- [scripts/AGENTS.md](scripts/AGENTS.md) — Windows packaging and generated
+  installer artwork helpers.
+- [tests/AGENTS.md](tests/AGENTS.md) — current pure/smoke test boundary.
