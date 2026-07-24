@@ -59,9 +59,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - **This is a CLIENT of the grid, not the grid.** It speaks the grid's worker protocols only;
   it never owns coordinator state. The grid's contracts live in `grid-core/grid_api`.
 - **WebSocket is the ONLY transport and the default.** A persistent WebSocket to
-  `/v1/workers/ws` (`GRID_STREAMING` defaults `true`) receives pushed jobs and streams tokens
-  back. The legacy HTTP `/v2` poll queue is RETIRED server-side; `api_client.py` is a stub that
-  raises `RuntimeError` on use, so any stale poll code path fails loud. P2P (`P2P_ENABLED`) is
+  `/v1/workers/ws` receives pushed jobs and streams tokens back. No HTTP polling
+  client or transport-selection flag is shipped. P2P (`P2P_ENABLED`) is
   experimental scaffolding.
 - **Multi-backend supervisor:** `GRID_BACKENDS` fans out one worker per configured backend from
   a single process. Declared `input_modalities` (e.g. vision) flow to the grid `/v1/models`
@@ -73,7 +72,7 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 
 - New config → add to `config.Settings`, surface in the web setup/settings pages and README env table.
 - Backend requests are OpenAI `/chat/completions`; route grid I/O through `ws_client` (WS),
-  never ad-hoc. `api_client` (the retired HTTP poll client) is a stub — do not revive it.
+  never ad-hoc.
 
 ## Verification
 

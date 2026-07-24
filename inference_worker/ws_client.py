@@ -1,13 +1,10 @@
 # SPDX-FileCopyrightText: 2026 AI Power Grid
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""WebSocket streaming client for the Grid Streaming API.
+"""WebSocket client for the Grid worker API.
 
-Replaces HTTP polling with a persistent WebSocket connection.
-The worker receives jobs pushed from the server and streams tokens
-back in real time as the inference engine generates them.
-
-Enable with GRID_STREAMING=true in your .env.
+The worker receives jobs pushed from the server and streams tokens back in
+real time as the inference engine generates them.
 """
 
 import asyncio
@@ -643,7 +640,7 @@ class StreamingWorker:
         max_tokens = openai_payload.get("max_tokens")
         logger.info(
             f"📥 Job {job_id[:8]} | model={model} | max_tokens={max_tokens} | "
-            f"mode={'passthrough' if faithful else 'legacy'}"
+            f"mode={'passthrough' if faithful else 'adapted'}"
         )
 
         url = self._get_completions_url()

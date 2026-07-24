@@ -27,5 +27,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[test]"
 
+      - name: Reject retired transports
+        shell: bash
+        run: |
+          if git grep -nEi 'AI[ -]?Horde|/api/v2|/v2/generate|GRID_STREAMING=' -- . \
+            ':(exclude).github/workflows/test.yml'; then
+            echo "::error::retired transport reference found above"
+            exit 1
+          fi
+
       - name: Run test suite
         run: pytest tests/ -v --tb=short

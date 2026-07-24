@@ -10,18 +10,15 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
 
 - **Grid transport:**
   - `ws_client.py` — `StreamingWorker` + `run_workers`: persistent WebSocket to
-    `/v1/workers/ws`, the ONLY transport and the default (`GRID_STREAMING` defaults `true`).
+    `/v1/workers/ws`, the only transport.
     Registers, receives pushed jobs, streams tokens back live, awaits a `done` ack with `den`
     reward, and honors `cancel` frames that abort the in-flight backend request. Reasoning
     models stream `<think>…</think>` live. `GRID_BACKENDS` runs one worker per backend under a
     single supervisor; declared `input_modalities` (vision) surface on grid `/v1/models`.
-  - `api_client.py` — RETIRED. The legacy `/v2` poll queue is gone server-side; this is a stub
-    whose `APIClient` raises `RuntimeError`. Do not revive it.
   - `p2p_client.py` — experimental libp2p/gossipsub transport (`P2P_ENABLED`, runs trio).
-- **Backend bridge:** `worker.py` — the `TextWorker` poll loop is DEAD (it drove the retired
-  `api_client`); what stays live are the shared helpers (`strip_thinking_tags`,
-  `ENLISTMENT_PROMPT`) reused by the WS path. `detect_backends.py` — port scan + model/context
-  probes + Ollama install.
+- **Backend bridge:** `prompts.py` owns shared local-backend prompts and response
+  cleanup. `detect_backends.py` owns port scans, model/context probes, and
+  Ollama installation.
 - **Config / launch:** `config.py` (`Settings`, per-machine default worker name, stable config
   dir), `env_utils.py` (.env read/write + dashboard token), `cli.py` (argparse entry, GUI vs
   console), `gui.py` (Tkinter window), `headless.py` (terminal quick-setup), `service.py`
@@ -42,7 +39,7 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
 
 ## Work Guidance
 
-- Job-shape changes land in `ws_client.py` (the only live transport); do not re-add a poll path.
+- Job-shape changes land in `ws_client.py`, the only live transport.
 - New backend engine → add a probe entry in `detect_backends.KNOWN_ENGINES`.
 
 ## Verification

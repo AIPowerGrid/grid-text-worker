@@ -9,8 +9,7 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 ## Ownership
 
 - `app.py` — `FastAPI` app + `lifespan`: starts/stops the worker task by calling
-  `ws_client.run_workers` (the WebSocket path is the only transport; the `TextWorker` HTTP poll
-  loop is retired along with the grid's `/v2` API), captures logs into a 500-line ring buffer.
+  `ws_client.run_workers`, captures logs into a 500-line ring buffer.
   Holds `worker_state` (shared with routes).
 - `routes.py` — all HTTP endpoints + two middlewares: `setup_guard` (redirect to `/setup`
   until configured) and `auth_guard` (dashboard token via cookie / Bearer / `?token=`).

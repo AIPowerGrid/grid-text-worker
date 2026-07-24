@@ -109,10 +109,6 @@ class Settings:
     MODALITIES = os.getenv("GRID_MODALITIES", "").strip()
     VISION = os.getenv("GRID_VISION", "").lower() in ("1", "true", "yes", "on")
 
-    # Streaming (WebSocket /v1) is the only live mode — the legacy /v2 poll
-    # queue is retired. Defaults ON; set "false" only knowingly (the worker
-    # refuses rather than poll the dead /v2 endpoint).
-    GRID_STREAMING = os.getenv("GRID_STREAMING", "true").lower() == "true"
     GRID_STREAMING_URL = os.getenv("GRID_STREAMING_URL", "")  # Override WS URL (auto-derived from GRID_API_URL if empty)
     # WS TLS: the recommended WS endpoint (wss://ws.aipowergrid.io) is DNS-only
     # (bypasses Cloudflare, which resets long-lived WS) and serves the Cloudflare

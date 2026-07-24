@@ -52,20 +52,20 @@
   <!-- Lifetime stats from Grid API -->
   <div class="stats-row" x-show="grid.worker">
     <div class="stat-card">
-      <div class="stat-value" x-text="formatNum(grid.worker?.kudos_rewards)"></div>
-      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points Lifetime</span></div>
+      <div class="stat-value" x-text="formatNum(grid.worker?.den_earned)"></div>
+      <div class="stat-label"><span class="hint" title="Den is the Grid work unit recorded for completed jobs.">Den Lifetime</span></div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="grid.worker?.requests_fulfilled ?? '—'"></div>
+      <div class="stat-value" x-text="grid.worker?.jobs_completed ?? '—'"></div>
       <div class="stat-label">Jobs Lifetime</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="formatPerf(grid.worker?.performance)"></div>
-      <div class="stat-label">Performance</div>
+      <div class="stat-value" x-text="grid.worker?.online ? 'Online' : 'Offline'"></div>
+      <div class="stat-label">Grid Status</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="formatUptime(grid.worker?.uptime)"></div>
-      <div class="stat-label">Uptime</div>
+      <div class="stat-value" x-text="grid.worker?.models?.length ?? '—'"></div>
+      <div class="stat-label">Models</div>
     </div>
   </div>
 
@@ -165,16 +165,12 @@
         <span class="config-value" x-text="grid.user?.username || '—'"></span>
       </div>
       <div class="config-item">
-        <span class="config-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points</span></span>
-        <span class="config-value" x-text="formatNum(grid.user?.kudos)"></span>
+          <span class="config-label"><span class="hint" title="Den is the Grid work unit recorded for completed jobs.">Den earned</span></span>
+          <span class="config-value" x-text="formatNum(grid.user?.den_earned)"></span>
       </div>
       <div class="config-item">
         <span class="config-label">Workers</span>
         <span class="config-value" x-text="grid.user?.worker_count ?? '—'"></span>
-      </div>
-      <div class="config-item">
-        <span class="config-label">Trusted</span>
-        <span class="config-value" x-text="grid.user?.trusted ? 'Yes' : 'No'"></span>
       </div>
     </div>
   </div>
