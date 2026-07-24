@@ -8,7 +8,7 @@ import textwrap
 
 from .config import Settings
 from .env_utils import ENV_PATH, is_configured, write_env, reload_settings
-from .worker import ENLISTMENT_PROMPT, strip_thinking_tags
+from .prompts import ENLISTMENT_PROMPT, strip_thinking_tags
 from . import service
 
 
@@ -223,18 +223,14 @@ def quick_setup() -> dict:
     suggested = default_worker_name()
     worker_name = input(f"  Worker name [{suggested}]: ").strip() or suggested
 
-    # --- Connection mode: streaming is the only live path (legacy /v2 retired) ---
     print()
-    print("  Connection: ⚡ streaming (WebSocket) — recommended & default.")
-    legacy = input("  Use legacy HTTP polling instead? [y/N]: ").strip().lower() == "y"
-    streaming = not legacy
+    print("  Connection: streaming WebSocket")
 
     # --- Assemble config ---
     first_b = backends[0]
     config = {
         "GRID_API_KEY": api_key,
         "GRID_WORKER_NAME": worker_name,
-        "GRID_STREAMING": "true" if streaming else "false",
         "GRID_BACKENDS": json.dumps(backends),
         # Back-compat single-backend vars (also satisfy is_configured()).
         "BACKEND_TYPE": first_b["type"],
@@ -251,7 +247,7 @@ def quick_setup() -> dict:
     # --- Summary ---
     print()
     print("  ── Summary " + "─" * 38)
-    print(f"  Worker:  {worker_name}   ({'streaming' if streaming else 'polling'})")
+    print(f"  Worker:  {worker_name}   (WebSocket)")
     for i, b in enumerate(backends, 1):
         print(f"    {i}. {b['model']:<28} → {b['grid_model']} (x{b['concurrency']})")
     print()
@@ -295,9 +291,6 @@ def run(args):
             Settings.OPENAI_URL = url + "/v1"
     if args.worker_name:
         Settings.GRID_WORKER_NAME = args.worker_name
-    if getattr(args, "streaming", False):
-        Settings.GRID_STREAMING = True
-
     if not is_configured():
         if args.no_setup:
             print("Error: GRID_API_KEY and MODEL_NAME are required.")
@@ -323,18 +316,8 @@ def run(args):
             print("\n  Shutting down...")
         return
 
-    # Streaming-only: the multi-backend supervisor serves EVERY backend in
-    # GRID_BACKENDS over WebSocket (/v1). The legacy /v2 HTTP poll loop is
-    # retired, so GRID_STREAMING=false is refused rather than polling a dead
-    # endpoint.
-    if not Settings.GRID_STREAMING:
-        print("  Error: legacy HTTP polling (/v2) is retired. This worker is")
-        print("  streaming-only. Remove GRID_STREAMING=false from your .env")
-        print("  (or set GRID_STREAMING=true) and restart.")
-        sys.exit(1)
-
     from .ws_client import run_workers
-    print("  ⚡ Streaming mode — WebSocket connection(s)")
+    print("  WebSocket connection(s)")
     try:
         asyncio.run(run_workers())
     except KeyboardInterrupt:

@@ -57,11 +57,7 @@ worker_state = {
 
 
 async def _run_worker():
-    """Run the multi-backend streaming supervisor as a background task.
-
-    Serves every backend in GRID_BACKENDS over WebSocket (/v1). The legacy /v2
-    HTTP poll loop (TextWorker) is retired along with the grid's /v2 API, so the
-    worker is streaming-only now."""
+    """Run every configured backend over the Grid WebSocket."""
     from ..ws_client import run_workers
     worker_state["worker"] = None
     worker_state["running"] = True

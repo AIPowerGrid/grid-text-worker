@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ..config import Settings
 from ..env_utils import ENV_PATH, read_env, write_env, reload_settings
-from ..worker import ENLISTMENT_PROMPT, strip_thinking_tags
+from ..prompts import ENLISTMENT_PROMPT, strip_thinking_tags
 from ..detect_backends import (
     DetectionResult,
     detect_backends,
@@ -373,42 +373,94 @@ async def restart_worker():
 async def api_grid_stats():
     """Fetch worker + grid stats from the AIPG API."""
     import httpx
-    api = Settings.GRID_API_URL.rstrip("/")
+    origin = Settings.GRID_API_URL.rstrip("/")
+    api = origin if origin.endswith("/v1") else f"{origin}/v1"
     headers = {"apikey": Settings.GRID_API_KEY} if Settings.GRID_API_KEY else {}
     result = {"user": None, "worker": None, "performance": None, "text_stats": None}
 
     async with httpx.AsyncClient(timeout=10) as client:
+        workers_payload = {}
         try:
-            r = await client.get(f"{api}/v2/find_user", headers=headers)
+            r = await client.get(f"{api}/workers")
             if r.status_code == 200:
-                result["user"] = r.json()
+                workers_payload = r.json()
+                workers = workers_payload.get("workers", [])
+                result["worker"] = next(
+                    (
+                        worker
+                        for worker in workers
+                        if worker.get("name", "").startswith(Settings.GRID_WORKER_NAME)
+                    ),
+                    None,
+                )
+                result["performance"] = {
+                    "text_worker_count": sum(
+                        "text" in (worker.get("job_types") or ["text"])
+                        for worker in workers
+                    ),
+                    "queued_text_requests": None,
+                    "past_minute_tokens": 0,
+                }
         except Exception:
             pass
 
         try:
-            r = await client.get(f"{api}/v2/status/performance")
+            r = await client.get(f"{api}/stats/totals")
             if r.status_code == 200:
-                result["performance"] = r.json()
+                totals = r.json()
+
+                def text_period(name):
+                    row = (totals.get(name) or {}).get("text") or {}
+                    return {
+                        "requests": row.get("jobs", 0),
+                        "tokens": row.get("units", 0),
+                        "den": row.get("den", 0),
+                    }
+
+                result["text_stats"] = {
+                    "day": text_period("day"),
+                    "month": text_period("month"),
+                    "total": text_period("total"),
+                }
         except Exception:
             pass
 
         try:
-            r = await client.get(f"{api}/v2/stats/text/totals")
+            r = await client.get(f"{api}/stats/models", params={"period": "minute"})
             if r.status_code == 200:
-                result["text_stats"] = r.json()
+                token_rate = sum(
+                    int(model.get("units") or 0)
+                    for model in r.json().get("models", [])
+                    if model.get("type") == "text"
+                )
+                if result["performance"] is not None:
+                    result["performance"]["past_minute_tokens"] = token_rate
         except Exception:
             pass
 
-        if Settings.GRID_WORKER_NAME:
-            try:
-                r = await client.get(f"{api}/v2/workers", headers=headers)
-                if r.status_code == 200:
-                    workers = r.json()
-                    for w in workers:
-                        if w.get("name", "").startswith(Settings.GRID_WORKER_NAME):
-                            result["worker"] = w
-                            break
-            except Exception:
-                pass
+        # An ordinary account key may read these; a narrowly scoped worker key
+        # correctly receives 403 and still gets the public network panel above.
+        try:
+            account = await client.get(f"{api}/account", headers=headers)
+            account_workers = await client.get(f"{api}/account/workers", headers=headers)
+            if account.status_code == 200:
+                result["user"] = account.json()
+            if account_workers.status_code == 200:
+                owned = account_workers.json()
+                if result["user"] is not None:
+                    result["user"]["worker_count"] = owned.get("count", 0)
+                    result["user"]["den_earned"] = owned.get("den_earned", 0)
+                detail = next(
+                    (
+                        worker
+                        for worker in owned.get("workers", [])
+                        if worker.get("name", "").startswith(Settings.GRID_WORKER_NAME)
+                    ),
+                    None,
+                )
+                if detail:
+                    result["worker"] = {**(result["worker"] or {}), **detail}
+        except Exception:
+            pass
 
     return result
