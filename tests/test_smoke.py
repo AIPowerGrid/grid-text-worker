@@ -19,6 +19,7 @@ from inference_worker.detect_backends import (
     _identify_engine_from_headers,
     get_platform,
 )
+from inference_worker.ws_client import _normalize_stream_delta
 
 
 # ============ KNOWN_ENGINES table shape ============
@@ -102,3 +103,18 @@ def test_get_platform_returns_expected_value():
         assert result == "windows"
     else:
         assert result == "linux"
+
+
+def test_vllm_reasoning_delta_is_normalized_without_mutating_source():
+    source = {"role": "assistant", "reasoning": "working"}
+
+    normalized = _normalize_stream_delta(source)
+
+    assert normalized == {"role": "assistant", "reasoning_content": "working"}
+    assert source == {"role": "assistant", "reasoning": "working"}
+
+
+def test_canonical_reasoning_delta_is_preserved():
+    source = {"reasoning_content": "working"}
+
+    assert _normalize_stream_delta(source) is source

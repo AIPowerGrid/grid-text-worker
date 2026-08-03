@@ -33,6 +33,15 @@ FORMAT_SUFFIX = {
 }
 
 
+def _normalize_stream_delta(delta: dict) -> dict:
+    """Normalize vLLM's alternate reasoning field without mutating its chunk."""
+    if delta.get("reasoning") and not delta.get("reasoning_content"):
+        normalized = dict(delta)
+        normalized["reasoning_content"] = normalized.pop("reasoning")
+        return normalized
+    return delta
+
+
 def _safe_json(s: str):
     """Parse a JSON string, returning None on failure (for usage-tee best effort)."""
     try:
@@ -722,8 +731,7 @@ class StreamingWorker:
                     # rather than the `reasoning_content` convention — normalize so
                     # the meaningful-check, accumulation, and downstream all see one
                     # name (else reasoning-only models look like 0-token failures).
-                    if delta.get("reasoning") and not delta.get("reasoning_content"):
-                        delta["reasoning_content"] = delta.pop("reasoning")
+                    delta = _normalize_stream_delta(delta)
 
                     meaningful = any(
                         delta.get(k) for k in ("content", "reasoning_content", "tool_calls", "refusal")
