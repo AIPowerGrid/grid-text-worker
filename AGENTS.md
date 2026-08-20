@@ -49,6 +49,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   detection, service install, CLI/GUI. Owned in its own AGENTS.md.
 - `run_worker.py` / `run_frozen.py` — thin launchers (dev / PyInstaller entry).
 - `scripts/`, `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build (no DOX child).
+- `.github/workflows/` and `.gitleaks.toml` — build/test automation plus
+  checksum-verified secret and operational-infrastructure scanning.
 - `docs/` — vLLM setup + optimization guides (Markdown, not AGENTS.md).
 - `tests/` — pytest smoke tests.
 
@@ -77,6 +79,7 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 ## Verification
 
 - `pip install -e ".[test]"` then `pytest` (smoke tests under `tests/`).
+- `gitleaks detect --source . --no-git --config .gitleaks.toml --redact`
 - `grid-inference-worker --no-gui` should boot the dashboard at `http://localhost:7861`.
 
 ## Child DOX Index
