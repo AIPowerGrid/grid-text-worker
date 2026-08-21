@@ -49,8 +49,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   detection, service install, CLI/GUI. Owned in its own AGENTS.md.
 - `run_worker.py` / `run_frozen.py` — thin launchers (dev / PyInstaller entry).
 - `scripts/`, `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build (no DOX child).
-- `.github/workflows/` and `.gitleaks.toml` — build/test automation plus
-  checksum-verified secret and operational-infrastructure scanning.
+- `.github/workflows/`, `.gitleaks.toml`, and `.gitleaksignore` — build/test
+  automation plus checksum-verified tracked-tree and complete reachable-history
+  scanning. Historical exceptions are exact reviewed fingerprints only.
 - `Dockerfile` / `.dockerignore` — digest-pinned, non-root worker image built
   from the frozen `uv.lock`; ignored secrets and local artifacts never enter
   the Docker build context.
@@ -88,7 +89,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 ## Verification
 
 - `pip install -e ".[test]"` then `pytest` (smoke tests under `tests/`).
-- `gitleaks detect --source . --no-git --config .gitleaks.toml --redact`
+- `gitleaks detect --source . --no-git --config .gitleaks.toml --redact`, then
+  `gitleaks git . --log-opts=HEAD --config .gitleaks.toml --redact` from a full
+  clone.
 - `uv lock --check` and `python scripts/verify-release-assets.py <payload-dir>`
   protect the binary release contract. A tag creates only a draft; publishing
   still requires Developer ID plus notarization on macOS, Authenticode on
