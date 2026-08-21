@@ -51,6 +51,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `scripts/`, `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build (no DOX child).
 - `.github/workflows/` and `.gitleaks.toml` — build/test automation plus
   checksum-verified secret and operational-infrastructure scanning.
+- `.github/workflows/build.yml` and `scripts/verify-release-assets.py` build
+  locked four-platform candidates, verify the complete checksum/SBOM/manifest
+  payload, attest provenance, and create draft-only tagged releases.
 - `docs/` — vLLM setup + optimization guides (Markdown, not AGENTS.md).
 - `tests/` — pytest smoke tests.
 
@@ -82,6 +85,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 
 - `pip install -e ".[test]"` then `pytest` (smoke tests under `tests/`).
 - `gitleaks detect --source . --no-git --config .gitleaks.toml --redact`
+- `uv lock --check` and `python scripts/verify-release-assets.py <payload-dir>`
+  protect the binary release contract. A tag creates only a draft; publishing
+  still requires platform signing and supervised staging.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
   `http://localhost:7861` without exposing the token in the settled browser URL.
 

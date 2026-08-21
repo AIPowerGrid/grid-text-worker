@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grid-inference-worker"
-version = "0.3.4"
+version = "0.3.5"
 description = "Turn-key text inference worker for AI Power Grid (multi-backend, OpenAI-compatible)"
 requires-python = ">=3.9"
 dependencies = [
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-build = ["pillow>=9.0.0", "pyinstaller"]
+build = ["pillow>=9.0.0", "pyinstaller>=6.0.0"]
 test = ["pytest", "pytest-asyncio", "respx"]
 
 [project.scripts]

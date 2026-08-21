@@ -11,6 +11,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   platform helpers, and backend URL policy.
 - `test_web_security.py` - management-plane redirect and backend-persistence
   boundaries.
+- `test_release_assets.py` - offline release payload, checksum, and archive
+  safety verification.
 
 ## Local Contracts
 

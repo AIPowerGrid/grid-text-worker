@@ -10,6 +10,8 @@ splash assets for the distributable text worker.
 - `build-exe.ps1`, `app.manifest` - Windows/PyInstaller packaging.
 - `run.ps1` - local Windows launch helper.
 - `make_icon.py`, `make_splash.py` - deterministic build-asset generation.
+- `verify-release-assets.py` - offline checksum, manifest, binary-format,
+  archive-path, and SPDX verification for the complete release payload.
 
 ## Local Contracts
 
