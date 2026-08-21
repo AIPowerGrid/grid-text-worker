@@ -91,6 +91,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `uv lock --check` and `python scripts/verify-release-assets.py <payload-dir>`
   protect the binary release contract. A tag creates only a draft; publishing
   still requires platform signing and supervised staging.
+- GitHub immutable releases must remain enabled. Draft assets may be replaced
+  during qualification, but after publication the tag and assets are permanent;
+  corrections require a new version.
 - CI audits the hashed lock export across all extras and builds/smokes the
   locked Docker image. Both checks are required branch gates.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
