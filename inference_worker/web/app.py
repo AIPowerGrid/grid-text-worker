@@ -67,9 +67,9 @@ async def _run_worker():
         await run_workers()
     except asyncio.CancelledError:
         logger.info("Worker task cancelled.")
-    except Exception as e:
-        logger.error(f"Worker error: {e}")
-        worker_state["error"] = str(e)
+    except Exception:
+        logger.exception("Worker stopped after an unexpected error")
+        worker_state["error"] = "Worker stopped unexpectedly; see local logs"
     finally:
         worker_state["running"] = False
 

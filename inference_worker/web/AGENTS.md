@@ -30,6 +30,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   inference services, but must pass `validated_backend_url` before probing or
   persistence. Cloud metadata, link-local, multicast, reserved, credentialed,
   query-bearing, and malformed targets are forbidden.
+- Management APIs return stable error classes rather than raw exceptions or
+  backend bodies. Automatic remote-script installation is not part of this UI;
+  operators install Ollama through its reviewed platform installer.
 - **Don't run blocking detection in request handlers** — `/setup` renders instantly and the
   page calls `POST /api/setup/detect`; wrap blocking probes in `asyncio.to_thread`.
 - Persist config only via `env_utils.write_env` + `reload_settings`; `Settings` is the single source.

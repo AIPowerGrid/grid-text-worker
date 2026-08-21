@@ -376,7 +376,7 @@ async def check_backend_url(url: str, api_key: str = "") -> dict:
     Returns dict with: reachable, engine, models, version, auth_required."""
     try:
         url = validated_backend_url(url)
-    except ValueError as exc:
+    except ValueError:
         return {
             "reachable": False,
             "engine": None,
@@ -384,7 +384,7 @@ async def check_backend_url(url: str, api_key: str = "") -> dict:
             "models": [],
             "version": None,
             "auth_required": False,
-            "error": str(exc),
+            "error": "Invalid backend URL",
         }
     info = {"reachable": False, "engine": None, "name": None, "models": [], "version": None, "auth_required": False}
 
@@ -555,30 +555,6 @@ def get_platform() -> str:
     return "linux"
 
 
-def install_ollama() -> dict:
-    """Install Ollama using the official install script (Linux/macOS only)."""
-    plat = get_platform()
-    if plat == "windows":
-        return {
-            "ok": False,
-            "error": "Auto-install not supported on Windows. Download from https://ollama.com/download/windows",
-        }
-    try:
-        proc = subprocess.run(
-            ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if proc.returncode == 0:
-            return {"ok": True}
-        return {"ok": False, "error": proc.stderr or "Install script failed"}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "Installation timed out (5 min)"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
 async def get_model_context_length(url: str, engine: str = None, model_name: str = None, api_key: str = "") -> dict:
     """Try to detect the model's context length from the backend.
     Returns {"context_length": int} or {"context_length": null}."""
@@ -666,8 +642,8 @@ async def pull_ollama_model(url: str, model_name: str) -> dict:
     """Pull a model in Ollama."""
     try:
         url = validated_backend_url(url)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    except ValueError:
+        return {"ok": False, "error": "Invalid backend URL"}
     try:
         async with httpx.AsyncClient(timeout=600) as client:
             resp = await client.post(
@@ -676,6 +652,7 @@ async def pull_ollama_model(url: str, model_name: str) -> dict:
             )
             if resp.status_code == 200:
                 return {"ok": True}
-            return {"ok": False, "error": resp.text}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": f"Backend returned HTTP {resp.status_code}"}
+    except Exception:
+        logger.exception("Ollama model pull failed")
+        return {"ok": False, "error": "Model pull failed; see local worker logs"}

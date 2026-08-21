@@ -13,7 +13,6 @@ from ..detect_backends import (
     check_backend_url,
     list_models_for_backend,
     get_model_context_length,
-    install_ollama,
     pull_ollama_model,
     get_platform,
     validated_backend_url,
@@ -183,14 +182,6 @@ async def api_check_url(request: Request):
     return info
 
 
-@app.post("/api/setup/install-ollama")
-async def api_install_ollama():
-    """Install Ollama using the official install script."""
-    import asyncio
-    result = await asyncio.to_thread(install_ollama)
-    return result
-
-
 @app.post("/api/setup/pull-model")
 async def api_pull_model(request: Request):
     """Pull an Ollama model."""
@@ -212,8 +203,8 @@ async def api_test_model(request: Request):
     req_body = await request.json()
     try:
         url = validated_backend_url(req_body.get("url", Settings.OLLAMA_URL))
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    except ValueError:
+        return {"ok": False, "error": "Invalid backend URL"}
     engine = req_body.get("engine", "ollama")
     model = req_body.get("model", "")
     api_key = req_body.get("api_key", "")
@@ -289,8 +280,8 @@ async def api_complete_setup(request: Request):
     """Save config and start the worker."""
     try:
         form = _validated_backend_settings(await request.json())
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
 
     write_env(form)
     reload_settings(form)
@@ -391,8 +382,8 @@ async def save_settings(request: Request):
     """Save settings to .env and update in-memory config."""
     try:
         form = _validated_backend_settings(await request.json())
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
 
     write_env(form, delete_empty=True)
     reload_settings(form)
