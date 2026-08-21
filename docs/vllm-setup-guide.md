@@ -25,7 +25,7 @@ This guide covers setting up vLLM as a high-performance inference backend for th
 
 ### Prerequisites
 
-- **Python**: 3.9 or newer
+- **Python**: 3.11 or newer
 - **CUDA**: 11.8 or newer (for NVIDIA GPUs)
 - **GPU VRAM**: Minimum 8GB (model-dependent)
 - **OS**: Linux (recommended), Windows WSL2, macOS (CPU-only)

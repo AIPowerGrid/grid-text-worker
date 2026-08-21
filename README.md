@@ -78,7 +78,7 @@ Copy `.env.example` to `.env` and fill in your values, or configure through the 
 
 ## Run from Source
 
-Requires Python 3.9+.
+Requires Python 3.11+.
 
 ```bash
 pip install -e .
