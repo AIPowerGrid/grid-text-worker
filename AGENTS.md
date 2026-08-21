@@ -51,7 +51,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `scripts/`, `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build (no DOX child).
 - `.github/workflows/`, `.gitleaks.toml`, and `.gitleaksignore` — build/test
   automation plus checksum-verified tracked-tree and complete reachable-history
-  scanning. Historical exceptions are exact reviewed fingerprints only.
+  scanning. Historical exceptions are exact reviewed fingerprints only, and CI
+  proves an example-labelled synthetic private key is rejected.
 - `Dockerfile` / `.dockerignore` — digest-pinned, non-root worker image built
   from the frozen `uv.lock`; ignored secrets and local artifacts never enter
   the Docker build context.
