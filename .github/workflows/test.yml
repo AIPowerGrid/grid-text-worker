@@ -52,3 +52,38 @@ jobs:
 
       - name: Run test suite
         run: uv run --frozen --extra test pytest tests/ -v --tb=short
+
+  dependency-audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.5"
+          enable-cache: false
+
+      - name: Export the complete locked dependency graph
+        run: >-
+          uv export --frozen --all-extras --no-dev --no-emit-project
+          --format requirements-txt --output-file /tmp/text-worker-all-deps.txt
+
+      - name: Audit locked dependencies
+        run: >-
+          uvx --from pip-audit==2.9.0 pip-audit
+          -r /tmp/text-worker-all-deps.txt --require-hashes --disable-pip
+
+  docker:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build locked worker image
+        run: docker build -t aipowergrid/text-worker:ci .
+
+      - name: Smoke-test worker image
+        run: docker run --rm aipowergrid/text-worker:ci grid-inference-worker --help

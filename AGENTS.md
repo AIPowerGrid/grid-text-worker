@@ -51,6 +51,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `scripts/`, `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build (no DOX child).
 - `.github/workflows/` and `.gitleaks.toml` — build/test automation plus
   checksum-verified secret and operational-infrastructure scanning.
+- `Dockerfile` / `.dockerignore` — digest-pinned, non-root worker image built
+  from the frozen `uv.lock`; ignored secrets and local artifacts never enter
+  the Docker build context.
 - `.github/workflows/build.yml` and `scripts/verify-release-assets.py` build
   locked four-platform candidates, verify the complete checksum/SBOM/manifest
   payload, attest provenance, and create draft-only tagged releases.
@@ -88,6 +91,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `uv lock --check` and `python scripts/verify-release-assets.py <payload-dir>`
   protect the binary release contract. A tag creates only a draft; publishing
   still requires platform signing and supervised staging.
+- CI audits the hashed lock export across all extras and builds/smokes the
+  locked Docker image. Both checks are required branch gates.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
   `http://localhost:7861` without exposing the token in the settled browser URL.
 
