@@ -7,6 +7,9 @@ on:
     tags: ["v*", "[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -89,8 +92,20 @@ jobs:
           path: |
             dist/grid-inference-worker-${{ matrix.target }}*
 
-      - name: Upload to release
-        if: startsWith(github.ref, 'refs/tags/')
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/grid-inference-worker-${{ matrix.target }}*
+          files: dist/grid-inference-worker-*

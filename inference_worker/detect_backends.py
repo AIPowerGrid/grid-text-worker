@@ -12,13 +12,16 @@ Scans known default ports to detect running inference engines:
   - TabbyAPI     :5000    /v1/models, /v1/model
 """
 
+import ipaddress
 import logging
 import platform
 import shutil
+import socket
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -26,6 +29,73 @@ logger = logging.getLogger(__name__)
 
 # Shorter timeout + parallel probes so detection finishes in ~1–2s instead of 25s+
 PROBE_TIMEOUT = 1.2
+
+_PROHIBITED_METADATA_HOSTS = {
+    "metadata",
+    "metadata.google.internal",
+}
+_PROHIBITED_METADATA_ADDRESSES = {
+    ipaddress.ip_address("100.100.100.200"),  # Alibaba Cloud
+    ipaddress.ip_address("169.254.169.254"),  # AWS, Azure, GCP, Oracle
+    ipaddress.ip_address("169.254.170.2"),    # AWS ECS credentials
+    ipaddress.ip_address("fd00:ec2::254"),    # AWS IMDS over IPv6
+}
+
+
+def validated_backend_url(value: str) -> str:
+    """Validate an operator-supplied inference endpoint.
+
+    Private and public backends are both supported intentionally.  The local
+    dashboard may not target link-local metadata services, malformed URLs, or
+    URLs with embedded credentials.  Hostnames are resolved once here so
+    obviously unsafe address classes fail before any probe is attempted.
+    """
+
+    raw = str(value or "").strip()
+    if not raw or len(raw) > 2048:
+        raise ValueError("Backend URL is required and must be at most 2048 characters")
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in raw):
+        raise ValueError("Backend URL must not contain control characters")
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Backend URL must use http or https")
+    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        raise ValueError("Backend URL must contain a host and no embedded credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Backend URL must not contain a query string or fragment")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Backend URL contains an invalid port") from exc
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("Backend URL contains an invalid port")
+
+    host = parsed.hostname.rstrip(".").lower()
+    if host in _PROHIBITED_METADATA_HOSTS or host.endswith(".metadata.google.internal"):
+        raise ValueError("Backend URL must not target a cloud metadata service")
+    addresses: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
+    try:
+        addresses.add(ipaddress.ip_address(host))
+    except ValueError:
+        try:
+            for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+                addresses.add(ipaddress.ip_address(item[4][0]))
+        except socket.gaierror as exc:
+            raise ValueError("Backend host could not be resolved") from exc
+    if not addresses:
+        raise ValueError("Backend host could not be resolved")
+    if any(
+        address in _PROHIBITED_METADATA_ADDRESSES
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+        for address in addresses
+    ):
+        raise ValueError("Backend URL resolves to a prohibited address")
+
+    normalized_path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme, parsed.netloc, normalized_path, "", ""))
 
 # ── Known engines and their default ports / probe endpoints ──────────────
 
@@ -304,7 +374,18 @@ def detect_ollama():
 async def check_backend_url(url: str, api_key: str = "") -> dict:
     """Probe a user-supplied URL and identify what engine is running.
     Returns dict with: reachable, engine, models, version, auth_required."""
-    url = url.rstrip("/")
+    try:
+        url = validated_backend_url(url)
+    except ValueError as exc:
+        return {
+            "reachable": False,
+            "engine": None,
+            "name": None,
+            "models": [],
+            "version": None,
+            "auth_required": False,
+            "error": str(exc),
+        }
     info = {"reachable": False, "engine": None, "name": None, "models": [], "version": None, "auth_required": False}
 
     headers = {}
@@ -429,7 +510,10 @@ async def check_backend_url(url: str, api_key: str = "") -> dict:
 
 async def list_models_for_backend(url: str, engine: str = None, api_key: str = "") -> list:
     """List models for any backend at the given URL."""
-    url = url.rstrip("/")
+    try:
+        url = validated_backend_url(url)
+    except ValueError:
+        return []
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -498,7 +582,10 @@ def install_ollama() -> dict:
 async def get_model_context_length(url: str, engine: str = None, model_name: str = None, api_key: str = "") -> dict:
     """Try to detect the model's context length from the backend.
     Returns {"context_length": int} or {"context_length": null}."""
-    url = url.rstrip("/")
+    try:
+        url = validated_backend_url(url)
+    except ValueError:
+        return {"context_length": None}
     ctx = None
     headers = {}
     if api_key:
@@ -577,6 +664,10 @@ async def get_model_context_length(url: str, engine: str = None, model_name: str
 
 async def pull_ollama_model(url: str, model_name: str) -> dict:
     """Pull a model in Ollama."""
+    try:
+        url = validated_backend_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     try:
         async with httpx.AsyncClient(timeout=600) as client:
             resp = await client.post(

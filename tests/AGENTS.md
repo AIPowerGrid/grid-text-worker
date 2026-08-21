@@ -8,7 +8,9 @@ does not currently prove a live backend-to-Grid job lifecycle.
 ## Ownership
 
 - `test_smoke.py` - known-engine table, OpenAI model parsing, header detection,
-  and platform helpers.
+  platform helpers, and backend URL policy.
+- `test_web_security.py` - management-plane redirect and backend-persistence
+  boundaries.
 
 ## Local Contracts
 

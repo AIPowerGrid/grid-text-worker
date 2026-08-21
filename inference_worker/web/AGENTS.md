@@ -23,6 +23,13 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   `start_worker`/`stop_worker`; never spawn a worker task elsewhere.
 - **Every page/API except `_AUTH_EXEMPT` (`/static`, `/login`, `/favicon.ico`) requires the
   dashboard token.** Keep new endpoints behind `auth_guard`; `/api/*` returns 401 JSON.
+- The dashboard binds to loopback by default. LAN exposure requires the explicit
+  `--host 0.0.0.0` operator choice. A valid `?token=` bootstrap is immediately
+  exchanged for a strict, HTTP-only cookie and removed from the browser URL.
+- Operator-supplied backend URLs may target loopback, private LAN, or public
+  inference services, but must pass `validated_backend_url` before probing or
+  persistence. Cloud metadata, link-local, multicast, reserved, credentialed,
+  query-bearing, and malformed targets are forbidden.
 - **Don't run blocking detection in request handlers** — `/setup` renders instantly and the
   page calls `POST /api/setup/detect`; wrap blocking probes in `asyncio.to_thread`.
 - Persist config only via `env_utils.write_env` + `reload_settings`; `Settings` is the single source.

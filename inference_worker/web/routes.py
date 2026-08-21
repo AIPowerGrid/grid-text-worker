@@ -16,12 +16,42 @@ from ..detect_backends import (
     install_ollama,
     pull_ollama_model,
     get_platform,
+    validated_backend_url,
 )
 from .app import app, templates, worker_state, log_buffer, start_worker, stop_worker
 
 logger = logging.getLogger(__name__)
 
 _AUTH_EXEMPT = ("/static", "/login", "/favicon.ico")
+
+
+def _safe_next_url(value: object) -> str:
+    parsed = urllib.parse.urlsplit(str(value or "/"))
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/") or parsed.path.startswith("//"):
+        return "/"
+    return urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, ""))
+
+
+def _set_auth_cookie(response, request: Request) -> None:
+    response.set_cookie(
+        "_token",
+        Settings.DASHBOARD_TOKEN,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="strict",
+        max_age=86400 * 365,
+        path="/",
+    )
+
+
+def _validated_backend_settings(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("Settings payload must be an object")
+    form = dict(value)
+    for key in ("OLLAMA_URL", "OPENAI_URL"):
+        if key in form and form[key]:
+            form[key] = validated_backend_url(form[key])
+    return form
 
 
 # ---------------------------------------------------------------------------
@@ -69,10 +99,12 @@ async def auth_guard(request: Request, call_next):
 
     # 3. Check ?token= query param (sets cookie for future requests)
     if request.query_params.get("token") == token:
-        response = await call_next(request)
-        response.set_cookie(
-            "_token", token, httponly=True, samesite="lax", max_age=86400 * 365,
+        clean_query = urllib.parse.urlencode(
+            [(key, value) for key, value in request.query_params.multi_items() if key != "token"]
         )
+        clean_url = urllib.parse.urlunsplit(("", "", path, clean_query, ""))
+        response = RedirectResponse(clean_url or "/", status_code=303)
+        _set_auth_cookie(response, request)
         return response
 
     # Unauthorized
@@ -86,7 +118,7 @@ async def auth_guard(request: Request, call_next):
 # ---------------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    next_url = request.query_params.get("next", "/")
+    next_url = _safe_next_url(request.query_params.get("next", "/"))
     return templates.TemplateResponse(request, "login.html", {"request": request, "next": next_url})
 
 
@@ -94,12 +126,10 @@ async def login_page(request: Request):
 async def login_submit(request: Request):
     form = await request.form()
     token = form.get("token", "")
-    next_url = form.get("next", "/")
+    next_url = _safe_next_url(form.get("next", "/"))
     if token == Settings.DASHBOARD_TOKEN:
         response = RedirectResponse(next_url, status_code=303)
-        response.set_cookie(
-            "_token", token, httponly=True, samesite="lax", max_age=86400 * 365,
-        )
+        _set_auth_cookie(response, request)
         return response
     return templates.TemplateResponse(request, "login.html", {
         "request": request, "next": next_url, "error": "Invalid token",
@@ -180,7 +210,10 @@ async def api_test_model(request: Request):
     import httpx
 
     req_body = await request.json()
-    url = req_body.get("url", Settings.OLLAMA_URL).rstrip("/")
+    try:
+        url = validated_backend_url(req_body.get("url", Settings.OLLAMA_URL))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     engine = req_body.get("engine", "ollama")
     model = req_body.get("model", "")
     api_key = req_body.get("api_key", "")
@@ -223,8 +256,9 @@ async def api_test_model(request: Request):
                     await asyncio.sleep(5)
                     continue
                 return {"ok": False, "error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        logger.exception("Backend model test failed")
+        return {"ok": False, "error": "Backend model test failed"}
 
 
 @app.post("/api/setup/context-length")
@@ -253,7 +287,10 @@ async def api_list_models(request: Request):
 @app.post("/api/setup/complete")
 async def api_complete_setup(request: Request):
     """Save config and start the worker."""
-    form = await request.json()
+    try:
+        form = _validated_backend_settings(await request.json())
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     write_env(form)
     reload_settings(form)
@@ -352,7 +389,10 @@ async def settings_page(request: Request):
 @app.post("/api/settings")
 async def save_settings(request: Request):
     """Save settings to .env and update in-memory config."""
-    form = await request.json()
+    try:
+        form = _validated_backend_settings(await request.json())
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     write_env(form, delete_empty=True)
     reload_settings(form)

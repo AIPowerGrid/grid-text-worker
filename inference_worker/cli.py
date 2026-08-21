@@ -77,6 +77,12 @@ def main():
                         help="Worker name on the grid")
     parser.add_argument("--port", type=int, default=7861, metavar="PORT",
                         help="Web dashboard port (default: 7861)")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        choices=("127.0.0.1", "localhost", "::1", "0.0.0.0"),
+        help="Dashboard bind host (default: loopback; 0.0.0.0 is an explicit LAN opt-in)",
+    )
     parser.add_argument("--install-service", action="store_true",
                         help="Install as a system service (systemd/launchd/Windows startup)")
     parser.add_argument("--uninstall-service", action="store_true",
@@ -108,7 +114,7 @@ def main():
     # Apply CLI overrides
     _apply_cli_overrides(args)
 
-    host = "0.0.0.0"
+    host = args.host
     port = args.port
     url = f"http://localhost:{port}"
 

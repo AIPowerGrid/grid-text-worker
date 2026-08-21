@@ -279,7 +279,7 @@
         <label class="field">
           <span class="field-label">Max Length <span class="optional">(tokens per response)</span></span>
           <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <input type="range" x-model="config.max_length" min="64" max="4096" step="64"
+            <input type="range" x-model="config.max_length" min="64" max="32768" step="64"
                    style="flex: 1; accent-color: var(--accent);">
             <span style="min-width: 3.5rem; text-align: right; font-size: 0.85rem; font-family: monospace; color: var(--text);"
                   x-text="config.max_length"></span>
@@ -356,7 +356,7 @@
           </div>
           <div class="review-row">
             <span class="review-label">Context</span>
-            <span class="review-value" x-text="(config.max_context_length || '4096') + ' tokens'"></span>
+            <span class="review-value" x-text="(config.max_context_length || '131072') + ' tokens'"></span>
           </div>
           <div class="review-row">
             <span class="review-label">Max Response</span>
@@ -448,8 +448,8 @@ function setupWizard() {
       api_key: '',
       worker_name: '',
       grid_model_name: '',
-      max_length: '4096',
-      max_context_length: '4096',
+      max_length: '32768',
+      max_context_length: '131072',
       wallet_address: '',
     },
     available_models: [],

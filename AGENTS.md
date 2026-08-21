@@ -68,6 +68,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   a single process. Declared `input_modalities` (e.g. vision) flow to the grid `/v1/models`
   surface; the WS carries `cancel` frames that abort an in-flight backend request.
 - **Config is env-only** via `inference_worker/config.py:Settings`; never read env elsewhere.
+- **The dashboard is local by default.** It binds to loopback; `--host 0.0.0.0`
+  is an explicit operator opt-in and never disables token authentication.
 - Run from `grid-core`'s prod tree on servers; this repo produces the distributable binary.
 
 ## Work Guidance
@@ -80,7 +82,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 
 - `pip install -e ".[test]"` then `pytest` (smoke tests under `tests/`).
 - `gitleaks detect --source . --no-git --config .gitleaks.toml --redact`
-- `grid-inference-worker --no-gui` should boot the dashboard at `http://localhost:7861`.
+- `grid-inference-worker --no-gui` should boot the token-protected dashboard at
+  `http://localhost:7861` without exposing the token in the settled browser URL.
 
 ## Child DOX Index
 

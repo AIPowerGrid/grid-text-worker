@@ -36,6 +36,9 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
 - Transport errors back off with bounded exponential delay; 401 surfaces as `api_auth_error`.
 - `service.py` uses `sys.executable` (not pip wrappers), `shlex.quote`s runtime paths, and
   writes units via secure temp files — keep these invariants.
+- `detect_backends.validated_backend_url` is the shared management-plane URL
+  boundary. Preserve support for operator-owned loopback, LAN, and public
+  backends while always rejecting cloud metadata and special-purpose targets.
 
 ## Work Guidance
 

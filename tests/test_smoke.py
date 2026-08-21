@@ -18,6 +18,7 @@ from inference_worker.detect_backends import (
     _extract_models_openai,
     _identify_engine_from_headers,
     get_platform,
+    validated_backend_url,
 )
 from inference_worker.ws_client import _normalize_stream_delta
 
@@ -118,3 +119,49 @@ def test_canonical_reasoning_delta_is_preserved():
     source = {"reasoning_content": "working"}
 
     assert _normalize_stream_delta(source) is source
+
+
+# ============ operator-supplied backend URLs ============
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("http://127.0.0.1:11434/", "http://127.0.0.1:11434"),
+        ("http://192.168.1.20:8000/v1/", "http://192.168.1.20:8000/v1"),
+        ("https://8.8.8.8/v1", "https://8.8.8.8/v1"),
+    ],
+)
+def test_validated_backend_url_accepts_operator_backends(value, expected):
+    assert validated_backend_url(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ftp://127.0.0.1/model",
+        "http://user:password@127.0.0.1:11434",
+        "http://127.0.0.1:11434/?target=metadata",
+        "http://127.0.0.1:11434/#fragment",
+        "http://127.0.0.1:99999",
+        "http://0.0.0.0:11434",
+        "http://169.254.169.254/latest/meta-data",
+        "http://169.254.170.2/v2/credentials",
+        "http://100.100.100.200/latest/meta-data",
+        "http://[fd00:ec2::254]/latest/meta-data",
+        "http://metadata.google.internal/computeMetadata/v1",
+    ],
+)
+def test_validated_backend_url_rejects_unsafe_targets(value):
+    with pytest.raises(ValueError):
+        validated_backend_url(value)
+
+
+def test_validated_backend_url_rejects_hostname_resolving_to_link_local(monkeypatch):
+    monkeypatch.setattr(
+        "inference_worker.detect_backends.socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("169.254.169.254", 80))],
+    )
+
+    with pytest.raises(ValueError):
+        validated_backend_url("http://backend.example")
