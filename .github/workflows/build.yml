@@ -5,26 +5,8 @@ on:
   push:
     branches: [main]
     tags: ["v*", "[0-9]+.[0-9]+.[0-9]+"]
-    paths:
-      - "inference_worker/**"
-      - "scripts/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "run_frozen.py"
-      - "favicon.ico"
-      - ".github/workflows/build.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "inference_worker/**"
-      - "scripts/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "run_frozen.py"
-      - "favicon.ico"
-      - ".github/workflows/build.yml"
 
 permissions:
   contents: read
