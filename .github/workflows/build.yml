@@ -223,6 +223,19 @@ jobs:
               "tag": os.environ["RELEASE_TAG"],
               "version": os.environ["RELEASE_VERSION"],
               "commit": os.environ["RELEASE_COMMIT"],
+              "platform_signing": {
+                  "macos": {
+                      "verified": False,
+                      "identity": "adhoc",
+                      "notarized": False,
+                      "team_id": None,
+                  },
+                  "windows": {
+                      "verified": False,
+                      "identity": "unsigned",
+                      "subject": None,
+                  },
+              },
               "assets": assets,
           }
           (root / "worker-release.json").write_text(

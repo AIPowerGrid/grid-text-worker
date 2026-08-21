@@ -60,6 +60,31 @@ def verify(root: Path) -> None:
         _die("release tag does not match version")
     if not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("commit") or "")):
         _die("release commit is invalid")
+    signing = manifest.get("platform_signing")
+    if not isinstance(signing, dict) or set(signing) != {"macos", "windows"}:
+        _die("release platform-signing state is invalid")
+    macos = signing.get("macos")
+    windows = signing.get("windows")
+    if (
+        not isinstance(macos, dict)
+        or set(macos) != {"verified", "identity", "notarized", "team_id"}
+        or not isinstance(macos.get("verified"), bool)
+        or not isinstance(macos.get("notarized"), bool)
+        or not isinstance(macos.get("identity"), str)
+        or (macos.get("team_id") is not None and not isinstance(macos["team_id"], str))
+    ):
+        _die("macOS signing state is invalid")
+    if (
+        not isinstance(windows, dict)
+        or set(windows) != {"verified", "identity", "subject"}
+        or not isinstance(windows.get("verified"), bool)
+        or not isinstance(windows.get("identity"), str)
+        or (
+            windows.get("subject") is not None
+            and not isinstance(windows["subject"], str)
+        )
+    ):
+        _die("Windows signing state is invalid")
     assets = manifest.get("assets")
     if (
         not isinstance(assets, list)

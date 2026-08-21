@@ -56,7 +56,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   the Docker build context.
 - `.github/workflows/build.yml` and `scripts/verify-release-assets.py` build
   locked four-platform candidates, verify the complete checksum/SBOM/manifest
-  payload, attest provenance, and create draft-only tagged releases.
+  payload, record explicit macOS/Windows signing state, attest provenance, and
+  create draft-only tagged releases.
 - `docs/` — vLLM setup + optimization guides (Markdown, not AGENTS.md).
 - `tests/` — pytest smoke tests.
 
@@ -90,7 +91,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `gitleaks detect --source . --no-git --config .gitleaks.toml --redact`
 - `uv lock --check` and `python scripts/verify-release-assets.py <payload-dir>`
   protect the binary release contract. A tag creates only a draft; publishing
-  still requires platform signing and supervised staging.
+  still requires Developer ID plus notarization on macOS, Authenticode on
+  Windows, and supervised staging. Public download surfaces must fail closed
+  unless the final manifest records those verified identities.
 - GitHub immutable releases must remain enabled. Draft assets may be replaced
   during qualification, but after publication the tag and assets are permanent;
   corrections require a new version.

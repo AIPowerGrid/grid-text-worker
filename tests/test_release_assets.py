@@ -51,6 +51,19 @@ def _write_payload(root: Path, mac_member: str | None = None) -> None:
         "tag": "v0.3.5",
         "version": "0.3.5",
         "commit": "a" * 40,
+        "platform_signing": {
+            "macos": {
+                "verified": False,
+                "identity": "adhoc",
+                "notarized": False,
+                "team_id": None,
+            },
+            "windows": {
+                "verified": False,
+                "identity": "unsigned",
+                "subject": None,
+            },
+        },
         "assets": manifest_assets,
     }
     manifest_path = root / "worker-release.json"
@@ -84,4 +97,23 @@ def test_unsafe_macos_archive_path_is_rejected(tmp_path: Path) -> None:
     _write_payload(tmp_path, "../Grid Inference Worker.app/Contents/MacOS/grid-inference-worker")
 
     with pytest.raises(SystemExit, match="unsafe path"):
+        release_verifier.verify(tmp_path)
+
+
+def test_missing_platform_signing_state_is_rejected(tmp_path: Path) -> None:
+    _write_payload(tmp_path)
+    manifest_path = tmp_path / "worker-release.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("platform_signing")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    checksum_lines = []
+    for name in release_verifier.CHECKSUMMED:
+        digest = hashlib.sha256((tmp_path / name).read_bytes()).hexdigest()
+        checksum_lines.append(f"{digest}  {name}")
+    (tmp_path / "SHA256SUMS").write_text(
+        "\n".join(checksum_lines) + "\n",
+        encoding="ascii",
+    )
+
+    with pytest.raises(SystemExit, match="platform-signing state"):
         release_verifier.verify(tmp_path)

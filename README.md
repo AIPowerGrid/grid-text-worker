@@ -9,10 +9,11 @@ Turn-key text inference worker for [AI Power Grid](https://aipowergrid.io). Run 
 Grab the latest binary for your platform from [Releases](https://github.com/AIPowerGrid/grid-text-worker/releases):
 
 Release candidates include `SHA256SUMS`, `worker-release.json`, an SPDX SBOM,
-and GitHub build-provenance attestations. Tagged builds remain drafts until
-platform signing and supervised staging are complete. Published releases are
-immutable; corrections are issued as a new version rather than replacing a tag
-or binary.
+and GitHub build-provenance attestations. The candidate manifest records
+macOS and Windows signing state explicitly. Tagged builds remain drafts until
+Developer ID/notarization, Authenticode, and supervised staging are complete.
+Published releases are immutable; corrections are issued as a new version
+rather than replacing a tag or binary.
 
 | Platform | File |
 |----------|------|
