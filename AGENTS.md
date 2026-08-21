@@ -96,6 +96,10 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   corrections require a new version.
 - CI audits the hashed lock export across all extras and builds/smokes the
   locked Docker image. Both checks are required branch gates.
+- Every pull request and `main` push assembles the locked four-platform binary
+  payload. Branch protection requires the final payload job, so the exact
+  releasable tip cannot bypass binary smoke, SBOM, checksum, and manifest
+  verification through a path-filtered change.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
   `http://localhost:7861` without exposing the token in the settled browser URL.
 
