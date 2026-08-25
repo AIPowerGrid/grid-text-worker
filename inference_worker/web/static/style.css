@@ -1111,6 +1111,23 @@ ul li::before { content: "\2022"; color: var(--accent); margin-right: 0.5rem; }
   .nav-brand { padding: 0; }
   .sb-label { display: none; }
   .nav-links { flex-direction: row; }
+  /* Comfortable touch targets for the primary nav on touch screens. */
+  .nav-links a { min-height: 44px; padding-top: 0; padding-bottom: 0; }
   .sb-foot { margin-top: 0; margin-left: auto; border-top: none; padding-top: 0; }
   .topbar { padding: 0 1rem; }
+}
+
+/* Phones: one compact header row, no duplicate worker chip. */
+@media (max-width: 640px) {
+  /* The chip duplicates the topbar status pill — drop it to save a row. */
+  .sb-foot { display: none; }
+  .topbar { height: 52px; gap: 0.5rem; }
+  /* Keep the pill to dot + state; the model name doesn't fit beside Restart. */
+  .status-pill .pill-model { display: none; }
+  .topbar-crumb > span:first-child,
+  .topbar-crumb > span:nth-child(2) { display: none; } /* "Worker /" prefix */
+  main { padding: 1rem 1rem 2.5rem; }
+  .shell-banner { margin: 1rem 1rem 0; }
+  .stats-row { gap: 0.6rem; }
+  .dash-columns { gap: 0.75rem; }
 }
