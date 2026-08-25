@@ -2,13 +2,14 @@
 {% block title %}Grid Inference Worker — Settings{% endblock %}
 {% block nav_settings %}active{% endblock %}
 
+{% block crumb %}Settings{% endblock %}
+{% block main_class %}form-main{% endblock %}
+
 {% block content %}
 <div x-data="settingsForm()">
-  <div class="page-header">
-    <h1>Settings</h1>
-  </div>
-
   <form @submit.prevent="save()" class="settings-form">
+    <div class="settings-grid">
+    <div>
     <div class="card">
       <h2>Grid API</h2>
       <label class="field">
@@ -63,6 +64,8 @@
       </label>
     </div>
 
+    </div>
+    <div>
     <div class="card">
       <h2>Limits</h2>
       <label class="field">
@@ -128,12 +131,14 @@
       </div>
     </div>
 
-    <div class="form-actions" style="justify-content: center;">
+    <div class="form-actions" style="justify-content: flex-start;">
       <button type="submit" class="btn btn-primary" :disabled="saving">
         <span x-show="!saving">Save Settings</span>
         <span x-show="saving">Saving...</span>
       </button>
       <span x-show="saved" class="save-ok" x-transition>Saved. Restart worker to apply.</span>
+    </div>
+    </div>
     </div>
   </form>
 </div>

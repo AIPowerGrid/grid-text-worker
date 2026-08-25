@@ -16,6 +16,14 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   `/setup` wizard APIs (`/api/setup/*`), dashboard APIs (`/api/status`, `/api/logs`,
   `/api/settings`, `/api/worker/restart`, `/api/grid-stats`), `/login`.
 - `templates/` (Jinja2), `static/` — UI assets, bundled into the PyInstaller build.
+  Theme = the AIPG **console theme**: token values in `static/style.css` are ported from
+  grid-frontend `src/app/globals.css` (dark), AIPG orange `#f8991d` primary, Lato. Keep the
+  two palettes in sync when the console rebrands.
+  `base.html` owns the app shell: a 256px left sidebar (brand, nav, worker chip footer)
+  beside a fluid column with a 64px breadcrumb topbar that carries the live status pill,
+  Restart, and error banners (`shellStatus()` polls `/api/status` on every page). Pages
+  extend it via blocks: `crumb`, `content`, `main_class`, plus `shell_nav`/`topbar`/
+  `shell_attrs`/`shell_script` which the setup wizard blanks to stay a centered flow.
 
 ## Local Contracts
 

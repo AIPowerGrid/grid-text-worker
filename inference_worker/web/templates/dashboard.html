@@ -2,76 +2,53 @@
 {% block title %}Grid Inference Worker — Dashboard{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
 
+{% block crumb %}Dashboard{% endblock %}
+
 {% block content %}
 <div x-data="dashboard()" x-init="poll()">
-
-  <!-- Hero: Worker status -->
-  <div class="dash-hero">
-    <div class="dash-hero-left">
-      <div class="status-indicator" :class="statusClass()">
-        <span x-text="statusLabel()"></span>
-      </div>
-      <p class="dash-model" x-show="status.config?.model_name">
-        <span x-text="status.config?.grid_model_name || status.config?.model_name"></span>
-      </p>
-      <template x-if="status.api_auth_error">
-        <p class="error" x-text="status.api_auth_error"></p>
-      </template>
-      <template x-if="status.worker_error">
-        <p class="error" x-text="status.worker_error"></p>
-      </template>
-    </div>
-    <div class="dash-hero-right">
-      <button class="btn btn-outline btn-sm" @click="restart()" :disabled="restarting">
-        <span x-show="!restarting">Restart</span>
-        <span x-show="restarting"><span class="spinner-sm"></span></span>
-      </button>
-    </div>
-  </div>
 
   <!-- Live session stats (from worker memory) -->
   <div class="stats-row" x-show="status.session_stats">
     <div class="stat-card accent">
-      <div class="stat-value" x-text="formatNum(status.session_stats?.kudos_per_hour)"></div>
       <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points/hr</span></div>
+      <div class="stat-value" x-text="formatNum(status.session_stats?.kudos_per_hour)"></div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="status.session_stats?.jobs_completed ?? '—'"></div>
       <div class="stat-label">Jobs (session)</div>
+      <div class="stat-value" x-text="status.session_stats?.jobs_completed ?? '—'"></div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="formatNum(status.session_stats?.jobs_per_hour)"></div>
       <div class="stat-label">Jobs/hr</div>
+      <div class="stat-value" x-text="formatNum(status.session_stats?.jobs_per_hour)"></div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="formatUptime(status.session_stats?.uptime_seconds)"></div>
       <div class="stat-label">Session</div>
+      <div class="stat-value" x-text="formatUptime(status.session_stats?.uptime_seconds)"></div>
     </div>
   </div>
 
   <!-- Lifetime stats from Grid API -->
   <div class="stats-row" x-show="grid.worker">
     <div class="stat-card">
-      <div class="stat-value" x-text="formatNum(grid.worker?.den_earned)"></div>
       <div class="stat-label"><span class="hint" title="Den is the Grid work unit recorded for completed jobs.">Den Lifetime</span></div>
+      <div class="stat-value" x-text="formatNum(grid.worker?.den_earned)"></div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="grid.worker?.jobs_completed ?? '—'"></div>
       <div class="stat-label">Jobs Lifetime</div>
+      <div class="stat-value" x-text="grid.worker?.jobs_completed ?? '—'"></div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="grid.worker?.online ? 'Online' : 'Offline'"></div>
       <div class="stat-label">Grid Status</div>
+      <div class="stat-value" x-text="grid.worker?.online ? 'Online' : 'Offline'"></div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" x-text="grid.worker?.models?.length ?? '—'"></div>
       <div class="stat-label">Models</div>
+      <div class="stat-value" x-text="grid.worker?.models?.length ?? '—'"></div>
     </div>
   </div>
 
-  <!-- Config + Grid side by side -->
+  <!-- Config / Network / Account -->
   <div class="dash-columns">
-    <!-- Worker config -->
     <div class="card">
       <h3>Worker Config</h3>
       <div class="config-grid">
@@ -116,7 +93,6 @@
       </div>
     </div>
 
-    <!-- Grid network stats -->
     <div class="card">
       <h3>Network</h3>
       <div class="config-grid">
@@ -146,17 +122,7 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- Quick links -->
-  <div class="card" style="margin-top: 0.75rem;">
-    <h3>Chat with your model</h3>
-    <p style="color: var(--text-dim); font-size: 0.85rem; margin: 0;">
-      Visit <a href="https://aipg.chat" target="_blank" rel="noopener" style="color: var(--accent);">aipg.chat</a> and select your model in the upper selector to chat with your worker on the Grid.
-    </p>
-  </div>
-
-  <!-- User info -->
+    <div class="dash-col-stack">
   <div class="card" x-show="grid.user" style="margin-top: 0.75rem;">
     <h3>Your Account</h3>
     <div class="config-grid">
@@ -175,6 +141,17 @@
     </div>
   </div>
 
+
+  <div class="card" style="margin-top: 0.75rem;">
+    <h3>Chat with your model</h3>
+    <p style="color: var(--text-dim); font-size: 0.85rem; margin: 0;">
+      Visit <a href="https://aipg.chat" target="_blank" rel="noopener" style="color: var(--accent);">aipg.chat</a> and select your model in the upper selector to chat with your worker on the Grid.
+    </p>
+  </div>
+
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -187,19 +164,6 @@ function dashboard() {
       config: null,
     },
     grid: { user: null, worker: null, performance: null, text_stats: null },
-    restarting: false,
-
-    statusClass() {
-      if (!this.status.worker_running) return 'offline';
-      if (this.status.api_auth_error) return 'error';
-      return 'online';
-    },
-
-    statusLabel() {
-      if (!this.status.worker_running) return 'Offline';
-      if (this.status.api_auth_error) return 'Auth Error';
-      return this.status.config?.worker_name || 'Online';
-    },
 
     formatNum(n) {
       if (n == null) return '—';
@@ -243,17 +207,6 @@ function dashboard() {
       await Promise.all([updateLocal(), updateGrid()]);
       setInterval(updateLocal, 5000);
       setInterval(updateGrid, 30000);
-    },
-
-    async restart() {
-      this.restarting = true;
-      try {
-        await fetch('/api/worker/restart', { method: 'POST' });
-        await new Promise(r => setTimeout(r, 1000));
-        await this.poll();
-      } finally {
-        this.restarting = false;
-      }
     }
   }
 }
