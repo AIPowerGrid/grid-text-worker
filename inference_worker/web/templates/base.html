@@ -7,29 +7,148 @@
   <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="/static/vendor/alpinejs-3.16.3.min.js"></script>
   {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
-  {% block nav %}
-  <nav>
-    <div class="nav-brand">
-      <img src="/static/logo.png" alt="AIPG" style="width: 24px; height: 24px; border-radius: 6px;">
-      Grid Inference Worker
+  <div class="app-shell" {% block shell_attrs %}x-data="shellStatus()" x-init="poll()"{% endblock %}>
+    {% block shell_nav %}
+    <aside class="sidebar">
+      <div class="nav-brand">
+        <img src="/static/logo.png" alt="AIPG" style="width: 26px; height: 26px; border-radius: 7px;">
+        Grid Inference Worker
+      </div>
+      <div class="sb-label">Worker</div>
+      <div class="nav-links">
+        <a href="/" class="{% block nav_dashboard %}{% endblock %}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          Dashboard
+        </a>
+        <a href="/logs" class="{% block nav_logs %}{% endblock %}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>
+          Logs
+        </a>
+        <a href="/settings" class="{% block nav_settings %}{% endblock %}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </a>
+      </div>
+      <div class="sb-foot">
+        <div class="sb-worker">
+          <img src="/static/logo.png" alt="" style="width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;">
+          <div style="flex: 1; min-width: 0;">
+            <div class="sb-worker-name" x-text="s.config?.worker_name || 'Worker'"></div>
+            <div class="sb-worker-status" :style="'color: ' + statusColor()">
+              <span class="status-dot" :class="statusClass()" style="width: 6px; height: 6px;"></span>
+              <span x-text="statusLabel()"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+    {% endblock %}
+    <div class="main-col">
+      {% block topbar %}
+      <header class="topbar">
+        <div class="topbar-crumb">
+          <span>Worker</span><span style="color: var(--border);">/</span><b>{% block crumb %}Dashboard{% endblock %}</b>
+        </div>
+        <div class="topbar-right">
+          <span class="status-pill">
+            <span class="status-dot" :class="statusClass()"></span>
+            <span x-text="statusLabel()"></span>
+            <span class="pill-model" x-show="s.config?.model_name"
+                  x-text="s.config?.grid_model_name || s.config?.model_name"></span>
+          </span>
+          <button class="btn btn-outline btn-sm" @click="restart()" :disabled="restarting">
+            <span x-show="!restarting" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+              Restart
+            </span>
+            <span x-show="restarting"><span class="spinner-sm"></span></span>
+          </button>
+        </div>
+      </header>
+      <template x-if="s.api_auth_error">
+        <div class="shell-banner" x-text="s.api_auth_error"></div>
+      </template>
+      <template x-if="restartError || s.worker_error">
+        <div class="shell-banner" x-text="restartError || s.worker_error"></div>
+      </template>
+      {% endblock %}
+      <main class="{% block main_class %}{% endblock %}">
+        {% block content %}{% endblock %}
+      </main>
     </div>
-    <div class="nav-links">
-      <a href="/" class="{% block nav_dashboard %}{% endblock %}">Dashboard</a>
-      <a href="/logs" class="{% block nav_logs %}{% endblock %}">Logs</a>
-      <a href="/settings" class="{% block nav_settings %}{% endblock %}">Settings</a>
-    </div>
-  </nav>
+  </div>
+
+  {% block shell_script %}
+  <script>
+  /* Shared shell chrome: worker status pill, sidebar chip, restart, error
+     banners. Polls the existing /api/status endpoint on every page so the
+     worker's state stays visible outside the dashboard. */
+  function shellStatus() {
+    return {
+      s: { worker_running: false, worker_error: null, api_auth_error: null, config: null },
+      restarting: false,
+      restartError: null,
+
+      async updateStatus() {
+        const r = await fetch('/api/status');
+        if (!r.ok) throw new Error(`Status request failed (${r.status})`);
+        this.s = await r.json();
+        window.dispatchEvent(new CustomEvent('worker-status', { detail: this.s }));
+      },
+
+      async poll() {
+        const update = () => this.updateStatus().catch(() => {
+          /* Dashboard unreachable; keep the last known state. */
+        });
+        await update();
+        setInterval(update, 5000);
+      },
+
+      statusClass() {
+        if (!this.s.worker_running) return 'offline';
+        if (this.s.api_auth_error) return 'error';
+        return 'online';
+      },
+      statusColor() {
+        if (!this.s.worker_running) return 'var(--red)';
+        if (this.s.api_auth_error) return 'var(--yellow)';
+        return 'var(--green)';
+      },
+      statusLabel() {
+        if (!this.s.worker_running) return 'Offline';
+        if (this.s.api_auth_error) return 'Auth Error';
+        return 'Online';
+      },
+
+      async restart() {
+        this.restarting = true;
+        this.restartError = null;
+        try {
+          const r = await fetch('/api/worker/restart', { method: 'POST' });
+          const body = await r.json().catch(() => ({}));
+          if (!r.ok || body.ok === false) {
+            const detail = body.error || body.detail || `request failed (${r.status})`;
+            throw new Error(`Worker restart failed: ${detail}`);
+          }
+          await this.updateStatus().catch(() => {
+            /* Restart succeeded; the regular poll will refresh status. */
+          });
+        } catch (e) {
+          this.restartError = e instanceof Error && e.message.startsWith('Worker restart failed:')
+            ? e.message
+            : 'Worker restart failed: dashboard unavailable';
+        } finally {
+          this.restarting = false;
+        }
+      },
+    };
+  }
+  </script>
   {% endblock %}
-  <main class="{% block main_class %}{% endblock %}">
-    {% block content %}{% endblock %}
-  </main>
 </body>
 </html>

@@ -16,6 +16,16 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   `/setup` wizard APIs (`/api/setup/*`), dashboard APIs (`/api/status`, `/api/logs`,
   `/api/settings`, `/api/worker/restart`, `/api/grid-stats`), `/login`.
 - `templates/` (Jinja2), `static/` — UI assets, bundled into the PyInstaller build.
+  Theme = the AIPG **console theme**: token values in `static/style.css` are ported from
+  grid-frontend `src/app/globals.css` (dark), AIPG orange `#f8991d` primary, and a
+  Lato-first local system-font stack. Keep the two palettes in sync when the console rebrands.
+  `static/vendor/` holds the exact Alpine.js runtime and its upstream license; the local
+  management UI must not execute remotely hosted scripts or depend on web fonts.
+  `base.html` owns the app shell: a 256px left sidebar (brand, nav, worker chip footer)
+  beside a fluid column with a 64px breadcrumb topbar that carries the live status pill,
+  Restart, and error banners (`shellStatus()` polls `/api/status` on every page). Pages
+  extend it via blocks: `crumb`, `content`, `main_class`, plus `shell_nav`/`topbar`/
+  `shell_attrs`/`shell_script` which the setup wizard blanks to stay a centered flow.
 
 ## Local Contracts
 
@@ -33,6 +43,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 - Management APIs return stable error classes rather than raw exceptions or
   backend bodies. Automatic remote-script installation is not part of this UI;
   operators install Ollama through its reviewed platform installer.
+- Browser runtime dependencies are versioned local assets included in the frozen
+  binary. Do not replace them with floating CDN URLs; update the vendored file,
+  license, and `static/vendor/README.md` provenance together.
 - **Don't run blocking detection in request handlers** — `/setup` renders instantly and the
   page calls `POST /api/setup/detect`; wrap blocking probes in `asyncio.to_thread`.
 - Persist config only via `env_utils.write_env` + `reload_settings`; `Settings` is the single source.
