@@ -95,9 +95,11 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   clone.
 - `uv lock --check` and `python scripts/verify-release-assets.py <payload-dir>`
   protect the binary release contract. A tag creates only a draft; publishing
-  still requires Developer ID plus notarization on macOS, Authenticode on
-  Windows, and supervised staging. Public download surfaces must fail closed
-  unless the final manifest records those verified identities.
+  requires supervised staging of the exact candidate assets. Developer ID plus
+  notarization on macOS and Authenticode on Windows are recommended trust
+  signals, not publication blockers. When either platform is unverified, the
+  manifest and public release notes must say so and include the relevant OS
+  installation warning; signing state must never be implied or hidden.
 - GitHub immutable releases must remain enabled. Draft assets may be replaced
   during qualification, but after publication the tag and assets are permanent;
   corrections require a new version.

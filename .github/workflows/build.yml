@@ -294,5 +294,5 @@ jobs:
             gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" "${assets[@]}" \
               --draft --verify-tag \
               --title "Grid Text Worker ${RELEASE_TAG#v}" \
-              --notes "Draft only: publish after platform signing and supervised staging validation."
+              --notes "Draft only: publish after supervised staging. Platform signing is optional, but unsigned status and installation warnings must be disclosed."
           fi
