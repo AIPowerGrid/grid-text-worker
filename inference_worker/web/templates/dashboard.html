@@ -5,7 +5,8 @@
 {% block crumb %}Dashboard{% endblock %}
 
 {% block content %}
-<div x-data="dashboard()" x-init="poll()">
+<div x-data="dashboard()" x-init="poll()"
+     @worker-status.window="status = $event.detail">
 
   <!-- Live session stats (from worker memory) -->
   <div class="stats-row" x-show="status.session_stats">
@@ -123,7 +124,7 @@
       </div>
     </div>
     <div class="dash-col-stack">
-  <div class="card" x-show="grid.user" style="margin-top: 0.75rem;">
+  <div class="card" x-show="grid.user">
     <h3>Your Account</h3>
     <div class="config-grid">
       <div class="config-item">
@@ -142,7 +143,7 @@
   </div>
 
 
-  <div class="card" style="margin-top: 0.75rem;">
+  <div class="card">
     <h3>Chat with your model</h3>
     <p style="color: var(--text-dim); font-size: 0.85rem; margin: 0;">
       Visit <a href="https://aipg.chat" target="_blank" rel="noopener" style="color: var(--accent);">aipg.chat</a> and select your model in the upper selector to chat with your worker on the Grid.
@@ -192,20 +193,13 @@ function dashboard() {
     },
 
     async poll() {
-      const updateLocal = async () => {
-        try {
-          const r = await fetch('/api/status');
-          this.status = await r.json();
-        } catch (e) {}
-      };
       const updateGrid = async () => {
         try {
           const r = await fetch('/api/grid-stats');
           this.grid = await r.json();
         } catch (e) {}
       };
-      await Promise.all([updateLocal(), updateGrid()]);
-      setInterval(updateLocal, 5000);
+      await updateGrid();
       setInterval(updateGrid, 30000);
     }
   }

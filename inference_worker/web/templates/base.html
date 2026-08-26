@@ -76,8 +76,8 @@
       <template x-if="s.api_auth_error">
         <div class="shell-banner" x-text="s.api_auth_error"></div>
       </template>
-      <template x-if="s.worker_error">
-        <div class="shell-banner" x-text="s.worker_error"></div>
+      <template x-if="restartError || s.worker_error">
+        <div class="shell-banner" x-text="restartError || s.worker_error"></div>
       </template>
       {% endblock %}
       <main class="{% block main_class %}{% endblock %}">
@@ -95,14 +95,19 @@
     return {
       s: { worker_running: false, worker_error: null, api_auth_error: null, config: null },
       restarting: false,
+      restartError: null,
+
+      async updateStatus() {
+        const r = await fetch('/api/status');
+        if (!r.ok) throw new Error(`Status request failed (${r.status})`);
+        this.s = await r.json();
+        window.dispatchEvent(new CustomEvent('worker-status', { detail: this.s }));
+      },
 
       async poll() {
-        const update = async () => {
-          try {
-            const r = await fetch('/api/status');
-            this.s = await r.json();
-          } catch (e) { /* dashboard unreachable; keep last state */ }
-        };
+        const update = () => this.updateStatus().catch(() => {
+          /* Dashboard unreachable; keep the last known state. */
+        });
         await update();
         setInterval(update, 5000);
       },
@@ -125,8 +130,24 @@
 
       async restart() {
         this.restarting = true;
-        try { await fetch('/api/worker/restart', { method: 'POST' }); } catch (e) {}
-        setTimeout(() => { this.restarting = false; }, 2000);
+        this.restartError = null;
+        try {
+          const r = await fetch('/api/worker/restart', { method: 'POST' });
+          const body = await r.json().catch(() => ({}));
+          if (!r.ok || body.ok === false) {
+            const detail = body.error || body.detail || `request failed (${r.status})`;
+            throw new Error(`Worker restart failed: ${detail}`);
+          }
+          await this.updateStatus().catch(() => {
+            /* Restart succeeded; the regular poll will refresh status. */
+          });
+        } catch (e) {
+          this.restartError = e instanceof Error && e.message.startsWith('Worker restart failed:')
+            ? e.message
+            : 'Worker restart failed: dashboard unavailable';
+        } finally {
+          this.restarting = false;
+        }
       },
     };
   }
