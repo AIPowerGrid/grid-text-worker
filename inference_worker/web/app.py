@@ -51,6 +51,7 @@ worker_state = {
     "running": False,
     "task": None,
     "worker": None,
+    "workers": {},
     "error": None,
     "setup_complete": False,
 }
@@ -60,11 +61,12 @@ async def _run_worker():
     """Run every configured backend over the Grid WebSocket."""
     from ..ws_client import run_workers
     worker_state["worker"] = None
+    worker_state["workers"] = {}
     worker_state["running"] = True
     worker_state["error"] = None
     logger.info("⚡ Streaming mode — connecting backend(s) via WebSocket")
     try:
-        await run_workers()
+        await run_workers(active_workers=worker_state["workers"])
     except asyncio.CancelledError:
         logger.info("Worker task cancelled.")
     except Exception:
@@ -72,6 +74,7 @@ async def _run_worker():
         worker_state["error"] = "Worker stopped unexpectedly; see local logs"
     finally:
         worker_state["running"] = False
+        worker_state["workers"].clear()
 
 
 async def start_worker():

@@ -288,7 +288,8 @@ async def api_complete_setup(request: Request):
 
     worker_state["setup_complete"] = True
 
-    # Start worker
+    # A corrected setup must replace any reconnecting worker using the old key.
+    await stop_worker()
     if Settings.GRID_API_KEY and Settings.MODEL_NAME:
         await start_worker()
 
@@ -310,6 +311,9 @@ async def dashboard(request: Request):
 
 @app.get("/api/status")
 async def api_status():
+    workers = list(worker_state["workers"].values()) if worker_state["running"] else []
+    connected = sum(w.connected for w in workers)
+    connection_error = next((w.connection_error for w in workers if w.connection_error), None)
     session_stats = None
     api_auth_error = None
     worker = worker_state.get("worker")
@@ -320,6 +324,10 @@ async def api_status():
 
     return {
         "worker_running": worker_state["running"],
+        "grid_connected": bool(workers) and connected == len(workers),
+        "connected_workers": connected,
+        "total_workers": len(workers),
+        "connection_error": connection_error,
         "worker_error": worker_state.get("error"),
         "api_auth_error": api_auth_error,
         "session_stats": session_stats,

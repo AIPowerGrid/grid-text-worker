@@ -96,6 +96,7 @@ jobs:
         run: |
           uv sync --frozen --extra build --extra test --python 3.11
           uv run --frozen --extra build --extra test pytest -q
+          node --test tests/onboarding-ui.test.mjs
           uv run --frozen --extra build python -m compileall -q inference_worker
       - name: Generate platform icons
         run: uv run --frozen --extra build python scripts/make_icon.py
@@ -116,6 +117,7 @@ jobs:
             "${MODE_ARGS[@]}" --noupx --name grid-inference-worker \
             --add-data "inference_worker/web/templates${SEP}inference_worker/web/templates" \
             --add-data "inference_worker/web/static${SEP}inference_worker/web/static" \
+            --add-data "inference_worker/certs${SEP}inference_worker/certs" \
             --add-data "favicon.ico${SEP}." \
             --hidden-import inference_worker.env_utils \
             --hidden-import inference_worker.service \
@@ -142,6 +144,7 @@ jobs:
             ARCHIVE="$BINARY"
           fi
           uv run --frozen --extra build pyi-archive_viewer -l "$ARCHIVE" > archive.txt
+          uv run --frozen --extra build python scripts/verify-bundled-ca.py "$ARCHIVE"
           if grep -Eiq '(^|[ /._-])(\.env|id_rsa|private[-_]?key|proxmox|credentials)([ /._-]|$)' archive.txt; then
             echo "Sensitive or operational material is present in the bundle" >&2
             exit 1

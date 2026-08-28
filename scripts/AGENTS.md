@@ -13,6 +13,8 @@ splash assets for the distributable text worker.
 - `verify-release-assets.py` - offline checksum, manifest, platform-signing
   state, binary-format, archive-path, and SPDX verification for the complete
   release payload.
+- `verify-bundled-ca.py` - checks one-file and onedir/macOS binaries contain the
+  exact reviewed public WebSocket CA certificate and that OpenSSL can load it.
 
 ## Local Contracts
 
@@ -20,6 +22,9 @@ splash assets for the distributable text worker.
   paths, signing material, or backend credentials.
 - Keep package entrypoints and data-file inclusion aligned with the Python CLI,
   local web UI, version metadata, and release workflow.
+- All build paths include `inference_worker/certs`. The public Cloudflare Origin
+  CA is required by the default WebSocket endpoint; it is not secret material.
+  Never replace this dependency with disabled TLS verification.
 - Generated artwork must use repository-owned source assets and remain
   reproducible from the scripts.
 

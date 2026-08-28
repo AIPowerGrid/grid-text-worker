@@ -13,6 +13,12 @@ does not currently prove a live backend-to-Grid job lifecycle.
   boundaries.
 - `test_release_assets.py` - offline release payload, checksum, and archive
   safety verification.
+- `test_worker_status.py` - mocked ready/rejected registration, disconnect and
+  supervisor cleanup, multi-backend status, and credential-safe reporting.
+- `test_bundled_ca.py` - public CA inclusion checks for onefile and onedir
+  layouts; requires the build extra. The release CI also checks actual binaries.
+- `onboarding-ui.test.mjs` - Node built-in tests of the actual template scripts:
+  bounded setup polling, rejection, unavailable status, and account links.
 
 ## Local Contracts
 
@@ -31,6 +37,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
 ## Verification
 
 - Run `pytest -q` from the repository root.
+- Run `node --test tests/onboarding-ui.test.mjs` with Node 20+ (CI runners include
+  Node); these deterministic UI tests need no npm packages.
 - For transport changes, perform the manual worker lifecycle in the parent
   guide in addition to this suite.
 

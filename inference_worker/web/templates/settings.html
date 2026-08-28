@@ -105,29 +105,8 @@
         </span>
       </div>
       <div class="wallet-body">
-        <!-- Not connected -->
-        <template x-if="!form.WALLET_ADDRESS">
-          <div>
-            <button type="button" class="btn btn-sm btn-outline" @click="connectWallet()" style="margin-bottom: 0.5rem;">Connect Wallet</button>
-            <p class="wallet-hint" x-show="wallet_hint" x-text="wallet_hint"></p>
-            <input type="text" x-model="form.WALLET_ADDRESS" placeholder="0x... or paste address" spellcheck="false" autocomplete="off">
-            <p class="field-hint" style="margin-top: 0.35rem;">Optional — if blank, rewards go to AIPG Dev Fund.</p>
-          </div>
-        </template>
-
-        <!-- Connected -->
-        <template x-if="form.WALLET_ADDRESS">
-          <div>
-            <div class="wallet-connected">
-              <div class="address-pill" :class="walletValid ? 'valid' : 'invalid'">
-                <svg class="chain-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#0000FF"/><path d="M8.5 4V20H11C17 20 17 8 11 8H8.5Z" fill="#fff"/></svg>
-                <span class="address-text" x-text="form.WALLET_ADDRESS.slice(0,6) + '...' + form.WALLET_ADDRESS.slice(-4)"></span>
-              </div>
-              <button type="button" class="btn-clear" @click="form.WALLET_ADDRESS = ''">Clear</button>
-            </div>
-            <p class="field-hint" style="margin-top: 0.5rem;" x-show="!walletValid">Invalid address — must be 0x + 40 hex characters.</p>
-          </div>
-        </template>
+        <p class="field-hint">Payouts use the Grid account that owns your API key.</p>
+        <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Manage payout wallet</a>
       </div>
     </div>
 
@@ -148,7 +127,6 @@ function settingsForm() {
   return {
     saving: false,
     saved: false,
-    wallet_hint: '',
     form: {
       GRID_API_KEY: {{ settings.GRID_API_KEY | tojson }},
       GRID_WORKER_NAME: {{ settings.GRID_WORKER_NAME | tojson }},
@@ -162,39 +140,6 @@ function settingsForm() {
       GRID_MAX_THREADS: {{ settings.GRID_MAX_THREADS | tojson }},
       GRID_MAX_LENGTH: {{ settings.GRID_MAX_LENGTH | tojson }},
       GRID_MAX_CONTEXT_LENGTH: {{ settings.GRID_MAX_CONTEXT_LENGTH | tojson }},
-      WALLET_ADDRESS: {{ settings.WALLET_ADDRESS | tojson }},
-    },
-    get walletValid() {
-      return /^0x[0-9a-fA-F]{40}$/.test(this.form.WALLET_ADDRESS);
-    },
-    async connectWallet() {
-      this.wallet_hint = '';
-      if (!window.ethereum) {
-        this.wallet_hint = 'No wallet detected \u2014 paste your address below';
-        return;
-      }
-      try {
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        this.form.WALLET_ADDRESS = accounts[0];
-        try {
-          await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0x2105' }],
-          });
-        } catch (e) {
-          if (e.code === 4902) {
-            await window.ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [{ chainId: '0x2105', chainName: 'Base',
-                         nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-                         rpcUrls: ['https://mainnet.base.org'],
-                         blockExplorerUrls: ['https://basescan.org'] }],
-            });
-          }
-        }
-      } catch (e) {
-        this.wallet_hint = 'Connection rejected';
-      }
     },
     async save() {
       this.saving = true;

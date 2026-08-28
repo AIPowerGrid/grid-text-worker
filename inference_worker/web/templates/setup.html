@@ -253,7 +253,7 @@
   <!-- ========== STEP 2: Grid API ========== -->
   <div class="step-panel" x-show="step === 2" x-transition>
     <h2>AI Power Grid</h2>
-    <p class="step-desc">Enter your API key to start receiving jobs. <a href="https://api.aipowergrid.io/register" target="_blank" rel="noopener">Get an API key</a></p>
+    <p class="step-desc">Enter your API key to start receiving jobs. <a href="https://console.aipowergrid.io/dashboard/api-key" target="_blank" rel="noopener">Get an API key</a></p>
 
     <div class="step-columns">
       <div class="step-col">
@@ -301,24 +301,8 @@
             </span>
           </div>
 
-          <!-- Not connected -->
-          <div x-show="!config.wallet_address">
-            <button type="button" class="btn btn-sm btn-outline" @click="connectWallet()" style="margin-bottom: 0.5rem;">Connect Wallet</button>
-            <p class="wallet-hint" x-show="wallet_hint" x-text="wallet_hint"></p>
-            <input type="text" x-model="config.wallet_address" placeholder="0x... or paste address" spellcheck="false" autocomplete="off">
-            <p class="field-hint" style="margin-top: 0.35rem;">Optional — if blank, rewards go to AIPG Dev Fund.</p>
-          </div>
-
-          <!-- Connected -->
-          <div x-show="config.wallet_address" x-cloak>
-            <div class="wallet-connected">
-              <div class="address-pill" :class="walletValid ? 'valid' : 'invalid'">
-                <svg class="chain-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#0000FF"/><path d="M8.5 4V20H11C17 20 17 8 11 8H8.5Z" fill="#fff"/></svg>
-                <span class="address-text" x-text="(config.wallet_address || '').slice(0,6) + '...' + (config.wallet_address || '').slice(-4)"></span>
-              </div>
-              <button type="button" class="btn-clear" @click="config.wallet_address = ''">Clear</button>
-            </div>
-          </div>
+          <p class="field-hint">Payouts use the Grid account that owns your API key.</p>
+          <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Manage payout wallet</a>
         </div>
       </div>
     </div>
@@ -367,7 +351,7 @@
           </div>
           <div class="review-row">
             <span class="review-label">Wallet</span>
-            <span class="review-value" x-text="config.wallet_address ? config.wallet_address.slice(0,6) + '...' + config.wallet_address.slice(-4) : 'Not set — rewards go to AIPG Developer Incubation Fund'"></span>
+            <span class="review-value">Managed in your Grid account</span>
           </div>
         </div>
 
@@ -387,7 +371,7 @@
     <!-- Deployment sequence -->
     <template x-if="deploy.started">
       <div class="deploy-sequence">
-        <div class="deploy-icon" :class="deploy.done ? 'landed' : 'dropping'">
+        <div class="deploy-icon" :class="deploy.done ? 'landed' : (deploy.error ? '' : 'dropping')">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
           </svg>
@@ -408,12 +392,12 @@
           </div>
           <div class="deploy-step" :class="deploy.phase >= 4 ? 'done' : ''">
             <span class="deploy-dot"></span>
-            <span>Worker is live!</span>
+            <span x-text="deploy.done ? 'Worker is live!' : 'Waiting for Grid confirmation'"></span>
           </div>
         </div>
 
         <div class="deploy-status" x-show="deploy.done" x-transition>
-          <p class="deploy-live">Your model is now serving the world</p>
+          <p class="deploy-live">Ready to receive Grid jobs</p>
           <p style="color: var(--text-dim); font-size: 0.82rem; margin-top: 0.35rem;"
              x-text="(config.grid_model_name || ('grid/' + config.model_name)) + ' on AI Power Grid'"></p>
           <button class="btn btn-primary" style="margin-top: 1.25rem;" @click="window.location.href = '/'">
@@ -425,6 +409,7 @@
         <div class="deploy-error" x-show="deploy.error" x-transition>
           <p style="color: var(--red); font-size: 0.85rem;" x-text="deploy.error"></p>
           <button class="btn btn-outline btn-sm" style="margin-top: 0.75rem;" @click="deploy.started = false">Back</button>
+          <a class="btn btn-outline btn-sm" style="margin-top: 0.75rem;" href="/logs">Open Logs</a>
         </div>
       </div>
     </template>
@@ -453,7 +438,6 @@ function setupWizard() {
       grid_model_name: '',
       max_length: '32768',
       max_context_length: '131072',
-      wallet_address: '',
     },
     available_models: [],
     checking_url: false,
@@ -461,7 +445,6 @@ function setupWizard() {
     pulling_model: false,
     pull_error: null,
     pull_ok: false,
-    wallet_hint: '',
     detected_context_length: null,
     detecting_context: false,
     context_fetch_done: false,
@@ -470,40 +453,6 @@ function setupWizard() {
 
     async init() {
       await this.runDetect();
-    },
-
-    get walletValid() {
-      return /^0x[0-9a-fA-F]{40}$/.test(this.config.wallet_address);
-    },
-
-    async connectWallet() {
-      this.wallet_hint = '';
-      if (!window.ethereum) {
-        this.wallet_hint = 'No wallet detected \u2014 paste your address below';
-        return;
-      }
-      try {
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        this.config.wallet_address = accounts[0];
-        try {
-          await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0x2105' }],
-          });
-        } catch (e) {
-          if (e.code === 4902) {
-            await window.ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [{ chainId: '0x2105', chainName: 'Base',
-                         nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-                         rpcUrls: ['https://mainnet.base.org'],
-                         blockExplorerUrls: ['https://basescan.org'] }],
-            });
-          }
-        }
-      } catch (e) {
-        this.wallet_hint = 'Connection rejected';
-      }
     },
 
     updateGridModelName() {
@@ -577,15 +526,11 @@ function setupWizard() {
 
       const wait = ms => new Promise(r => setTimeout(r, ms));
 
-      // Phase 1: Save config
-      this.deploy.phase = 1;
-      await wait(600);
-
       try {
         const isOllama = this.config.engine === 'ollama';
         const payload = {
           GRID_API_KEY: this.config.api_key,
-          GRID_WORKER_NAME: this.config.worker_name || 'Text-Inference-Worker',
+          GRID_WORKER_NAME: this.config.worker_name.trim(),
           MODEL_NAME: this.config.model_name,
           BACKEND_TYPE: isOllama ? 'ollama' : 'openai',
         };
@@ -599,35 +544,44 @@ function setupWizard() {
         if (this.config.grid_model_name) payload.GRID_MODEL_NAME = this.config.grid_model_name;
         if (this.config.max_length) payload.GRID_MAX_LENGTH = this.config.max_length;
         if (this.config.max_context_length) payload.GRID_MAX_CONTEXT_LENGTH = this.config.max_context_length;
-        if (this.config.wallet_address) payload.WALLET_ADDRESS = this.config.wallet_address;
         if (this.config.backend_api_key) payload.OPENAI_API_KEY = this.config.backend_api_key;
-
-        // Phase 2: Connect to grid
-        this.deploy.phase = 2;
-        await wait(800);
 
         const r = await fetch('/api/setup/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(30000),
         });
         const d = await r.json();
 
-        if (!d.ok) {
+        if (!r.ok || !d.ok) {
           this.deploy.error = 'Setup failed';
           return;
         }
 
-        // Phase 3: Deploying model
-        this.deploy.phase = 3;
-        await wait(1200);
-
-        // Phase 4: Live!
-        this.deploy.phase = 4;
-        this.deploy.done = true;
+        // Config saved is not registration. Only Grid's ready handshake is live.
+        this.deploy.phase = 1;
+        for (let attempt = 0; attempt < 90; attempt++) {
+          const statusResponse = await fetch('/api/status', { signal: AbortSignal.timeout(5000) });
+          if (!statusResponse.ok) throw new Error('Worker status unavailable. Open Logs for details.');
+          const status = await statusResponse.json();
+          if (status.worker_error || status.connection_error) {
+            this.deploy.error = status.worker_error || status.connection_error;
+            return;
+          }
+          if (status.grid_connected) {
+            this.deploy.phase = 4;
+            this.deploy.done = true;
+            return;
+          }
+          await wait(1000);
+        }
+        this.deploy.error = 'Configuration saved, but Grid connection is not confirmed. Open Logs to check progress.';
 
       } catch (e) {
-        this.deploy.error = e.message || 'Deployment failed';
+        this.deploy.error = e.name === 'TimeoutError'
+          ? 'Worker status timed out. Open Logs to check progress.'
+          : e.message || 'Deployment failed';
       }
     },
 

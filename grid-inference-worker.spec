@@ -12,6 +12,7 @@ a = Analysis(
     datas=[
         ('inference_worker/web/templates', 'inference_worker/web/templates'),
         ('inference_worker/web/static', 'inference_worker/web/static'),
+        ('inference_worker/certs', 'inference_worker/certs'),
         ('favicon.ico', '.'),
     ],
     hiddenimports=[

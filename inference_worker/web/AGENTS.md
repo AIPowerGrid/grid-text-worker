@@ -49,6 +49,15 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 - **Don't run blocking detection in request handlers** — `/setup` renders instantly and the
   page calls `POST /api/setup/detect`; wrap blocking probes in `asyncio.to_thread`.
 - Persist config only via `env_utils.write_env` + `reload_settings`; `Settings` is the single source.
+- `/api/status` separates process lifetime (`worker_running`) from confirmed
+  registration (`grid_connected`, `connected_workers`, `total_workers`). Online
+  requires every active connection to have a Grid `ready` handshake. Poll failure
+  makes status unavailable rather than preserving a stale Online badge.
+- Setup waits for confirmed registration after saving. A rejection or bounded
+  wait failure exposes Logs, never a timed success animation. Retrying setup
+  restarts the previous worker so corrected credentials actually take effect.
+- API-key and payout-wallet setup link to the console. Do not request wallet
+  connections locally or claim the legacy wallet field controls rewards.
 
 ## Work Guidance
 
@@ -57,7 +66,11 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 ## Verification
 
 - Boot `grid-inference-worker --no-gui`; open the printed `?token=` URL; complete the wizard
-  against a local backend and confirm the dashboard shows the worker running.
+  against a local backend and confirm Grid registration, not just a running task.
+- Test an invalid API key and unavailable Grid endpoint: neither may display
+  successful setup/Online. Also verify a clean stop clears all child connections.
+- `node --test tests/onboarding-ui.test.mjs` checks wizard and status transitions
+  without contacting a backend or Grid.
 
 ## Child DOX Index
 

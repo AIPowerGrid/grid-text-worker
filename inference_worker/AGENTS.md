@@ -33,7 +33,14 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   `state="faulted"` on backend validation errors.
 - **Thinking tags:** the streaming path surfaces reasoning live wrapped in `<think>…</think>`
   and always closes an open block.
-- Transport errors back off with bounded exponential delay; 401 surfaces as `api_auth_error`.
+- Transport errors back off with bounded exponential delay. `connected` becomes
+  true only after a valid Grid `ready` frame with a worker ID. Disconnect,
+  cancellation, and close clear that state before cleanup/backoff. A bounded
+  `connection_error` reaches the dashboard without remote response bodies.
+- The supervisor optionally exposes its active workers to the dashboard and
+  awaits child cleanup before returning, including scheduled scale-down.
+- Grid resolves the payout wallet from the authenticated account. The legacy
+  local `WALLET_ADDRESS` is not payout authority and must not be presented as such.
 - `service.py` uses `sys.executable` (not pip wrappers), `shlex.quote`s runtime paths, and
   writes units via secure temp files — keep these invariants.
 - `detect_backends.validated_backend_url` is the shared management-plane URL
