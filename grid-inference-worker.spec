@@ -3,15 +3,18 @@
 # For onedir build use: .\build-exe.ps1 -OneDir
 
 import os
+from PyInstaller.utils.hooks import copy_metadata
+
 spec_dir = os.path.dirname(os.path.abspath(SPEC))
 
 a = Analysis(
     ['run_frozen.py'],
     pathex=[],
     binaries=[],
-    datas=[
+    datas=copy_metadata('py_ecc') + [
         ('inference_worker/web/templates', 'inference_worker/web/templates'),
         ('inference_worker/web/static', 'inference_worker/web/static'),
+        ('inference_worker/certs', 'inference_worker/certs'),
         ('favicon.ico', '.'),
     ],
     hiddenimports=[
@@ -20,6 +23,10 @@ a = Analysis(
         'inference_worker.gui',
         'inference_worker.headless',
         'inference_worker.web.routes',
+        'python_multipart',
+        'multipart',
+        'eth_account',
+        'eth_account.messages',
         'uvicorn.logging',
         'uvicorn.loops.auto',
         'uvicorn.protocols.http.auto',

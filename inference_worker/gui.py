@@ -8,6 +8,13 @@ from pathlib import Path
 from . import service
 
 
+def _copy_to_clipboard(root, value: str) -> None:
+    """Copy an explicitly requested secret without logging or rendering it."""
+    root.clipboard_clear()
+    root.clipboard_append(value)
+    root.update()
+
+
 def _enable_dpi_awareness():
     if sys.platform != "win32":
         return
@@ -156,8 +163,24 @@ def run(url: str, auth_url: str = None, ready: threading.Event = None):
             except Exception as e:
                 mb.showerror("Clear Config", f"Could not clear config: {e}", parent=root)
 
+    def copy_dashboard_link_action():
+        import tkinter.messagebox as mb
+        if not auth_url:
+            mb.showerror("Dashboard Link", "Dashboard access link is unavailable.", parent=root)
+            return
+        try:
+            _copy_to_clipboard(root, auth_url)
+            mb.showinfo(
+                "Dashboard Link",
+                "Authenticated dashboard link copied. Treat it like a password.",
+                parent=root,
+            )
+        except Exception as e:
+            mb.showerror("Dashboard Link", f"Could not copy the dashboard link: {e}", parent=root)
+
     buttons = [
         ("Open Dashboard", lambda: webbrowser.open(auth_url or url)),
+        ("Copy Dashboard Link", copy_dashboard_link_action),
         ("Install Service", install_service_action),
         ("Exit", lambda: (root.destroy(), sys.exit(0))),
     ]
@@ -185,7 +208,7 @@ def run(url: str, auth_url: str = None, ready: threading.Event = None):
         btn_widgets.append((label, b))
 
     # Set initial service button label
-    svc_btn = btn_widgets[1][1]
+    svc_btn = btn_widgets[2][1]
     _update_service_label()
 
     # Red "Clear Config" button — only enabled if worker is configured

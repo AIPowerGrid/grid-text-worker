@@ -143,6 +143,8 @@ class StreamingWorker:
         self.backend = httpx.AsyncClient(timeout=120)
         self.ws = None
         self.worker_id = None
+        self.connected = False
+        self.connection_error: str | None = None
         self.api_formats = ["openai-chat"]
         # Input modalities advertised at registration so the grid can mark the
         # model image-capable and the chat UI enables image upload. Either the
@@ -155,7 +157,20 @@ class StreamingWorker:
         self._reconnect_delay = 1
         self._jobs_completed = 0
         self._total_den = 0.0
+        self._session_started = time.monotonic()
         self._job_in_flight = False
+
+    def session_stats(self) -> dict:
+        """Return local, process-lifetime counters for dashboard aggregation."""
+        uptime = max(time.monotonic() - self._session_started, 0.0)
+        hours = uptime / 3600
+        return {
+            "jobs_completed": self._jobs_completed,
+            "den_earned": self._total_den,
+            "jobs_per_hour": self._jobs_completed / hours if hours else 0.0,
+            "den_per_hour": self._total_den / hours if hours else 0.0,
+            "uptime_seconds": uptime,
+        }
 
     def _sign_receipt(self, job_id: str, full_text: str):
         """Sign sha256(result) with the worker's identity key (EIP-191).
@@ -343,6 +358,8 @@ class StreamingWorker:
 
     async def connect(self):
         """Connect to the Grid Streaming API via WebSocket."""
+        self.connected = False
+        self.worker_id = None
         # Health-gate: never register if the local backend isn't serving.
         # run() retries with backoff, so a worker whose vLLM/LM Studio is down
         # keeps probing and only comes online once it can actually generate.
@@ -401,20 +418,30 @@ class StreamingWorker:
 
         # Wait for ready response
         response = json.loads(await asyncio.wait_for(self.ws.recv(), timeout=30))
-        if response.get("type") == "error":
-            raise ConnectionRefusedError(f"Server rejected connection: {response.get('message')}")
+        if isinstance(response, dict) and response.get("type") == "error":
+            self.connection_error = "Grid rejected registration; check the API key, worker name, and model."
+            raise ConnectionRefusedError(self.connection_error)
 
-        if response.get("type") == "ready":
+        if (
+            isinstance(response, dict)
+            and response.get("type") == "ready"
+            and isinstance(response.get("worker_id"), str)
+            and response["worker_id"].strip()
+        ):
             self.worker_id = response["worker_id"]
+            self.connected = True
+            self.connection_error = None
             self._reconnect_delay = 1  # Reset backoff on success
             logger.info(f"Connected as worker {self.worker_id}")
         else:
-            raise ConnectionError(f"Unexpected response: {response}")
+            self.connection_error = "Grid returned an invalid registration response."
+            raise ConnectionError(self.connection_error)
 
     async def run(self):
         """Main loop with auto-reconnect."""
         while True:
             monitor = None
+            delay = self._reconnect_delay
             try:
                 await self.connect()
                 # Steady-state health: probe the backend periodically so a
@@ -426,18 +453,27 @@ class StreamingWorker:
                 # Backend is down — we are deliberately OFF the grid (deregistered)
                 # until it recovers. Keep probing with backoff; do not accept jobs.
                 logger.warning(f"Backend offline ({e}); staying OFF the grid, re-checking in {self._reconnect_delay}s...")
-                await asyncio.sleep(self._reconnect_delay)
+                self.connection_error = "Local backend is not ready; check the model and endpoint."
+                delay = self._reconnect_delay
                 self._reconnect_delay = min(self._reconnect_delay * 2, 30)
             except (websockets.ConnectionClosed, ConnectionRefusedError, ConnectionError, OSError) as e:
                 logger.warning(f"Connection lost: {e}. Reconnecting in {self._reconnect_delay}s...")
-                await asyncio.sleep(self._reconnect_delay)
+                self.connection_error = self.connection_error or "Grid connection lost; reconnecting."
+                delay = self._reconnect_delay
                 self._reconnect_delay = min(self._reconnect_delay * 2, 30)
             except Exception as e:
                 logger.error(f"Unexpected error: {e}", exc_info=True)
-                await asyncio.sleep(5)
+                self.connection_error = "Connection failed; see local logs."
+                delay = 5
             finally:
+                # Status must go offline before cleanup or the reconnect delay.
+                self.connected = False
+                self.worker_id = None
                 if monitor:
                     monitor.cancel()
+                    await asyncio.gather(monitor, return_exceptions=True)
+                await self._disconnect()
+            await asyncio.sleep(delay)
 
     async def _health_monitor(self):
         """Periodically re-probe the backend; close the WS (→ reconnect, which
@@ -921,9 +957,20 @@ class StreamingWorker:
             logger.warning(f"No ack received for raw job {job_id[:8]}")
 
     async def close(self):
-        if self.ws:
-            await self.ws.close()
-        await self.backend.aclose()
+        try:
+            await self._disconnect()
+        finally:
+            await self.backend.aclose()
+
+    async def _disconnect(self) -> None:
+        self.connected = False
+        self.worker_id = None
+        ws, self.ws = self.ws, None
+        if ws is not None:
+            try:
+                await ws.close()
+            except (websockets.ConnectionClosed, OSError):
+                logger.debug("WebSocket already disconnected during cleanup")
 
 
 # ── Concurrency throttle + optional schedule ──────────────────────────────
@@ -1010,23 +1057,34 @@ def _connection_names(base: str, n: int):
     return [base] + [f"{base}#{i}" for i in range(2, n + 1)]
 
 
-async def _run_one(name: str, spec):
+async def _run_one(name: str, spec, active_workers: dict[str, StreamingWorker]):
     """Run one connection forever (its own reconnect loop), cleaning up on cancel."""
     w = StreamingWorker(name=name, spec=spec)
+    active_workers[name] = w
     try:
         await w.run()
     finally:
         try:
             await w.close()
         except Exception:
-            pass
+            logger.exception("Worker connection cleanup failed")
+        finally:
+            if active_workers.get(name) is w:
+                active_workers.pop(name)
 
 
-async def run_workers():
+async def run_workers(
+    active_workers: dict[str, StreamingWorker] | None = None,
+    expected_workers: set[str] | None = None,
+):
     """Supervisor: across ALL configured backends, keep each backend's
     `effective_concurrency()` parallel connections alive, scaling with schedules.
     One binary, many (backend, model) pairs. concurrency 0 = that backend paused."""
     from .config import load_backends
+    if active_workers is None:
+        active_workers = {}
+    if expected_workers is None:
+        expected_workers = set()
     backends = load_backends()
     logger.info(
         "serving %d backend(s): %s",
@@ -1048,15 +1106,20 @@ async def run_workers():
                 if n != last.get(b.name):
                     logger.info(f"[{b.grid_model_name}] concurrency={n} → {sorted(names) or 'PAUSED'}")
                     last[b.name] = n
+            expected_workers.clear()
+            expected_workers.update(want)
             for nm in want:  # spawn missing / restart any that died
                 t = tasks.get(nm)
                 if t is None or t.done():
-                    tasks[nm] = asyncio.create_task(_run_one(nm, specs[nm]))
+                    tasks[nm] = asyncio.create_task(_run_one(nm, specs[nm], active_workers))
             for nm in list(tasks):  # cancel extras (scaled down / paused)
                 if nm not in want:
-                    tasks[nm].cancel()
-                    tasks.pop(nm, None)
+                    task = tasks.pop(nm)
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
             await asyncio.sleep(SUPERVISOR_INTERVAL)
     finally:
         for t in tasks.values():
             t.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
+        expected_workers.clear()

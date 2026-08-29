@@ -12,7 +12,7 @@
   <div class="stats-row" x-show="status.session_stats">
     <div class="stat-card accent">
       <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points/hr</span></div>
-      <div class="stat-value" x-text="formatNum(status.session_stats?.kudos_per_hour)"></div>
+      <div class="stat-value" x-text="formatNum(status.session_stats?.den_per_hour)"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Jobs (session)</div>
@@ -80,15 +80,7 @@
         <div class="config-item">
           <span class="config-label">Wallet</span>
           <span class="config-value">
-            <template x-if="status.config?.wallet_address">
-              <span class="wallet-addr-mini">
-                <svg class="chain-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#0000FF"/><path d="M8.5 4V20H11C17 20 17 8 11 8H8.5Z" fill="#fff"/></svg>
-                <span x-text="(status.config?.wallet_address || '').slice(0,6) + '...' + (status.config?.wallet_address || '').slice(-4)"></span>
-              </span>
-            </template>
-            <template x-if="!status.config?.wallet_address">
-              <span style="color: var(--text-dim);">Not set (donating to AIPG Dev Fund)</span>
-            </template>
+            <a href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Managed in Grid account</a>
           </span>
         </div>
       </div>
@@ -161,7 +153,6 @@ function dashboard() {
     status: {
       worker_running: {{ 'true' if worker_running else 'false' }},
       worker_error: {{ worker_error | tojson }},
-      api_auth_error: null,
       config: null,
     },
     grid: { user: null, worker: null, performance: null, text_stats: null },

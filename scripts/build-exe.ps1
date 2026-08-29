@@ -28,6 +28,7 @@ $iconArg = if (Test-Path $iconPath) { @("--icon", (Resolve-Path $iconPath).Path)
 
 $templates = "inference_worker/web/templates;inference_worker/web/templates"
 $static    = "inference_worker/web/static;inference_worker/web/static"
+$certs     = "inference_worker/certs;inference_worker/certs"
 $faviconData = if (Test-Path $iconPath) { "favicon.ico;." } else { "" }
 
 $mode = if ($OneDir) { "directory (fast startup)" } else { "single file" }
@@ -48,7 +49,7 @@ try {
 if (-not $OneDir) {
   python -m PyInstaller --noconfirm --clean grid-inference-worker.spec
 } else {
-  $addDataArgs = @("--add-data", $templates, "--add-data", $static)
+  $addDataArgs = @("--add-data", $templates, "--add-data", $static, "--add-data", $certs)
   if ($faviconData) { $addDataArgs += "--add-data", $faviconData }
   $manifestPath = Join-Path $PSScriptRoot "app.manifest"
   $manifestArg = if (Test-Path $manifestPath) { @("--manifest", (Resolve-Path $manifestPath).Path) } else { @() }
@@ -66,6 +67,11 @@ if (-not $OneDir) {
     "--hidden-import", "inference_worker.gui"
     "--hidden-import", "inference_worker.headless"
     "--hidden-import", "inference_worker.web.routes"
+    "--hidden-import", "python_multipart"
+    "--hidden-import", "multipart"
+    "--hidden-import", "eth_account"
+    "--hidden-import", "eth_account.messages"
+    "--copy-metadata", "py_ecc"
     "--hidden-import", "uvicorn.logging"
     "--hidden-import", "uvicorn.loops.auto"
     "--hidden-import", "uvicorn.protocols.http.auto"

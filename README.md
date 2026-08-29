@@ -20,8 +20,8 @@ version rather than replacing a tag or binary.
 |----------|------|
 | Windows x64 | `grid-inference-worker-windows-x64.exe` |
 | macOS ARM64 | `grid-inference-worker-macos-arm64.zip` |
-| Linux x64 | `grid-inference-worker-linux-x64` |
-| Linux ARM64 | `grid-inference-worker-linux-arm64` |
+| Linux x64 (Ubuntu 22.04+) | `grid-inference-worker-linux-x64` |
+| Linux ARM64 (Ubuntu 24.04+) | `grid-inference-worker-linux-arm64` |
 
 **Windows** — Double-click the exe. A setup wizard opens in your browser at `http://localhost:7861`.
 
@@ -33,6 +33,21 @@ No Python or dependencies needed. Just install a backend (Ollama is easiest), ru
 
 You'll need a Grid API key. Sign in and create one in the
 [developer console](https://console.aipowergrid.io/dashboard/api-key).
+
+The wizard confirms a Grid registration before reporting success. A running
+process alone is not an online worker. The dashboard distinguishes connecting,
+partially connected, online, and unavailable status. If setup cannot confirm a
+connection, open Logs and check the backend, API key, and worker name; saving
+configuration does not prove a job has completed.
+
+Payouts use the account that owns your API key. Manage the payout wallet in
+[console settings](https://console.aipowergrid.io/dashboard/settings), not in the
+worker. The legacy local `WALLET_ADDRESS` setting does not set a Grid payout
+destination. Do not enter a wallet private key in this application.
+
+The desktop manager can copy an authenticated dashboard link for another local
+browser. In headless mode, run `grid-inference-worker --show-dashboard-link`
+explicitly; normal startup logs never print the dashboard token.
 
 Once your worker is running, chat with your model at [aipg.chat](https://aipg.chat) — select your model in the upper selector.
 
@@ -78,7 +93,7 @@ Copy `.env.example` to `.env` and fill in your values, or configure through the 
 | `GRID_MAX_LENGTH` | `32768` | Fallback output-token budget when the request omits one |
 | `GRID_MAX_CONTEXT_LENGTH` | `131072` | Maximum advertised context window (auto-detected when possible) |
 | `GRID_NSFW` | `true` | Accept NSFW jobs |
-| `WALLET_ADDRESS` | | Base chain wallet for rewards |
+| `WALLET_ADDRESS` | | Legacy local value; does not control Grid payouts |
 
 ## Run from Source
 

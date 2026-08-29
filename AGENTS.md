@@ -60,7 +60,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   locked four-platform candidates, verify the complete checksum/SBOM/manifest
   payload, record explicit macOS/Windows signing state, attest provenance, and
   create draft-only tagged releases.
-- `docs/` — vLLM setup + optimization guides (Markdown, not AGENTS.md).
+- `docs/` — vLLM setup/optimization guides and candidate release notes
+  (Markdown, not AGENTS.md).
 - `tests/` — pytest smoke tests.
 
 ## Local Contracts
@@ -111,6 +112,12 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   verification through a path-filtered change.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
   `http://localhost:7861` without exposing the token in the settled browser URL.
+- Every frozen platform must pass `scripts/verify-bundled-ca.py` during build.
+  `--help` alone does not verify the default Grid TLS path or onboarding. Linux
+  x64 targets Ubuntu 22.04+; the ARM64 build targets Ubuntu 24.04+.
+- Every frozen platform also runs `--verify-runtime`, which imports dashboard
+  form parsing and performs an in-memory EIP-191 sign/recover proof. A binary
+  missing `python-multipart` or `eth-account` is not releasable.
 
 ## Child DOX Index
 

@@ -70,11 +70,8 @@
           </button>
         </div>
       </header>
-      <template x-if="s.api_auth_error">
-        <div class="shell-banner" x-text="s.api_auth_error"></div>
-      </template>
-      <template x-if="restartError || s.worker_error">
-        <div class="shell-banner" x-text="restartError || s.worker_error"></div>
+      <template x-if="restartError || s.worker_error || s.connection_error">
+        <div class="shell-banner" x-text="restartError || s.worker_error || s.connection_error"></div>
       </template>
       {% endblock %}
       <main class="{% block main_class %}{% endblock %}">
@@ -90,38 +87,45 @@
      worker's state stays visible outside the dashboard. */
   function shellStatus() {
     return {
-      s: { worker_running: false, worker_error: null, api_auth_error: null, config: null },
+      s: { worker_running: false, worker_error: null, config: null },
       restarting: false,
       restartError: null,
+      statusUnavailable: false,
 
       async updateStatus() {
         const r = await fetch('/api/status');
         if (!r.ok) throw new Error(`Status request failed (${r.status})`);
         this.s = await r.json();
+        this.statusUnavailable = false;
         window.dispatchEvent(new CustomEvent('worker-status', { detail: this.s }));
       },
 
       async poll() {
         const update = () => this.updateStatus().catch(() => {
-          /* Dashboard unreachable; keep the last known state. */
+          this.statusUnavailable = true;
         });
         await update();
         setInterval(update, 5000);
       },
 
       statusClass() {
+        if (this.statusUnavailable) return 'error';
         if (!this.s.worker_running) return 'offline';
-        if (this.s.api_auth_error) return 'error';
+        if (!this.s.grid_connected) return 'error';
         return 'online';
       },
       statusColor() {
+        if (this.statusUnavailable) return 'var(--yellow)';
         if (!this.s.worker_running) return 'var(--red)';
-        if (this.s.api_auth_error) return 'var(--yellow)';
+        if (!this.s.grid_connected) return 'var(--yellow)';
         return 'var(--green)';
       },
       statusLabel() {
+        if (this.statusUnavailable) return 'Status unavailable';
         if (!this.s.worker_running) return 'Offline';
-        if (this.s.api_auth_error) return 'Auth Error';
+        if (this.s.connected_workers && !this.s.grid_connected) return 'Partially connected';
+        if (this.s.connection_error) return 'Connection error';
+        if (!this.s.grid_connected) return 'Connecting';
         return 'Online';
       },
 
