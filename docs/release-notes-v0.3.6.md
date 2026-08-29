@@ -1,7 +1,7 @@
-# Text Worker v0.3.6 Candidate
+# Text Worker v0.3.6
 
-Status: release candidate only. No v0.3.6 tag or public release has been
-created.
+This release repairs the clean-install onboarding path and makes the manager's
+connection status reflect Core acceptance instead of local process liveness.
 
 ## Operator Changes
 
@@ -39,11 +39,14 @@ created.
   locked dependency graph. A public release must include checksums, SBOM,
   provenance, and the platform-signing manifest.
 
-## Remaining Publication Gates
+## Release Qualification
 
-- Complete one native interactive Windows onboarding pass from an extracted
-  candidate outside the source checkout.
-- Complete one supervised production Grid job with the exact candidate and
-  confirm the signed receipt and truthful disconnect/reconnect behavior.
-- Present the final release payload and test evidence before publishing the
-  draft. Published v0.3.5 remains immutable.
+- The tagged workflow rebuilds and tests Windows x64, Linux x64, Linux ARM64,
+  and macOS ARM64 from the locked dependency graph.
+- Every frozen artifact must pass the dashboard form-parser import and an
+  in-memory EIP-191 sign/recover proof before it can enter the release payload.
+- The assembled payload includes SHA-256 checksums, an SPDX SBOM, a signing
+  manifest, and GitHub provenance attestation.
+- Windows remains unsigned and macOS remains unnotarized for this release. The
+  installation warnings above are part of the release contract, not an implied
+  trust claim.
