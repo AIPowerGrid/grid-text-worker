@@ -60,7 +60,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   locked four-platform candidates, verify the complete checksum/SBOM/manifest
   payload, record explicit macOS/Windows signing state, attest provenance, and
   create draft-only tagged releases.
-- `docs/` — vLLM setup + optimization guides (Markdown, not AGENTS.md).
+- `docs/` — vLLM setup/optimization guides and candidate release notes
+  (Markdown, not AGENTS.md).
 - `tests/` — pytest smoke tests.
 
 ## Local Contracts
