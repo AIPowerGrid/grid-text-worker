@@ -53,11 +53,16 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   registration (`grid_connected`, `connected_workers`, `total_workers`). Online
   requires every active connection to have a Grid `ready` handshake. Poll failure
   makes status unavailable rather than preserving a stale Online badge.
+- Session counters aggregate every active connection; no singular worker slot is
+  authoritative in a multi-backend process.
 - Setup waits for confirmed registration after saving. A rejection or bounded
   wait failure exposes Logs, never a timed success animation. Retrying setup
   restarts the previous worker so corrected credentials actually take effect.
 - API-key and payout-wallet setup link to the console. Do not request wallet
   connections locally or claim the legacy wallet field controls rewards.
+- The native manager may copy the authenticated dashboard link only after an
+  explicit operator action. Ordinary startup logs show the token-free local URL;
+  the web dashboard and status APIs never render or return the token.
 
 ## Work Guidance
 

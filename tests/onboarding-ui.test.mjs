@@ -26,13 +26,19 @@ const response = data => ({ ok: true, json: async () => data });
 
 test('setup links to the console and does not promise local wallet payouts', () => {
   assert.ok(setup.includes('https://console.aipowergrid.io/dashboard/api-key'));
-  assert.ok(!setup.includes('api.aipowergrid.io/register'));
   for (const file of ['setup.html', 'settings.html', 'dashboard.html']) {
     const source = readFileSync(new URL(file, templates), 'utf8');
+    assert.ok(!source.includes('api.aipowergrid.io/register'));
     assert.ok(!source.includes('Dev Fund'));
     assert.ok(!source.includes('eth_requestAccounts'));
     assert.ok(source.includes('https://console.aipowergrid.io/dashboard/settings'));
   }
+});
+
+test('backend credentials remain editable and labels are backend-neutral', () => {
+  assert.ok(!setup.includes('x-show="config.backend_api_key ||'));
+  assert.ok(setup.includes('Backend endpoint'));
+  assert.ok(!setup.includes('OpenAI Endpoint'));
 });
 
 test('saving configuration and a running process do not imply Grid acceptance', async () => {

@@ -58,6 +58,20 @@ def _apply_cli_overrides(args):
         Settings.GRID_WORKER_NAME = args.worker_name
 
 
+def _verify_runtime_dependencies() -> None:
+    """Exercise dynamically loaded packages inside a frozen release."""
+    import python_multipart  # noqa: F401
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    account = Account.create()
+    message = encode_defunct(text="aipg-worker-runtime-self-check")
+    signed = account.sign_message(message)
+    if Account.recover_message(message, signature=signed.signature) != account.address:
+        raise RuntimeError("worker receipt-signing self-check failed")
+    print("Worker runtime dependencies verified")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="grid-inference-worker",
@@ -89,9 +103,20 @@ def main():
                         help="Remove the system service")
     parser.add_argument("--service-status", action="store_true",
                         help="Check if the service is installed and running")
+    parser.add_argument("--show-dashboard-link", action="store_true",
+                        help="Print the authenticated local dashboard link and exit")
+    parser.add_argument("--verify-runtime", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     _setup_logging()
+
+    if args.verify_runtime:
+        _verify_runtime_dependencies()
+        return
+    if args.show_dashboard_link:
+        from .env_utils import ensure_dashboard_token
+        print(f"http://localhost:{args.port}?token={ensure_dashboard_token()}")
+        return
 
     # Service commands (no worker, just install/remove/status)
     if args.service_status:
@@ -159,7 +184,8 @@ def main():
         # Console mode: wait for ready, print URL, auto-open browser
         logger = logging.getLogger(__name__)
         ready.wait(timeout=30)
-        logger.info(f"Dashboard: {auth_url}")
+        logger.info(f"Dashboard: {url}")
+        logger.info("Use --show-dashboard-link to copy access into another browser.")
         if _has_display():
             webbrowser.open(auth_url)
         try:

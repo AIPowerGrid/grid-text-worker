@@ -10,7 +10,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
 - `test_smoke.py` - known-engine table, OpenAI model parsing, header detection,
   platform helpers, and backend URL policy.
 - `test_web_security.py` - management-plane redirect and backend-persistence
-  boundaries.
+  boundaries, real login form parsing/cookies, model-test response handling,
+  dashboard-link clipboard behavior, and frozen-runtime dependency checks.
 - `test_release_assets.py` - offline release payload, checksum, and archive
   safety verification.
 - `test_worker_status.py` - mocked ready/rejected registration, disconnect and

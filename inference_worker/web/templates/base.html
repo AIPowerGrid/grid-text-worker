@@ -70,9 +70,6 @@
           </button>
         </div>
       </header>
-      <template x-if="s.api_auth_error">
-        <div class="shell-banner" x-text="s.api_auth_error"></div>
-      </template>
       <template x-if="restartError || s.worker_error || s.connection_error">
         <div class="shell-banner" x-text="restartError || s.worker_error || s.connection_error"></div>
       </template>
@@ -90,7 +87,7 @@
      worker's state stays visible outside the dashboard. */
   function shellStatus() {
     return {
-      s: { worker_running: false, worker_error: null, api_auth_error: null, config: null },
+      s: { worker_running: false, worker_error: null, config: null },
       restarting: false,
       restartError: null,
       statusUnavailable: false,

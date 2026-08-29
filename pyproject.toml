@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grid-inference-worker"
-version = "0.3.5"
+version = "0.3.6"
 description = "Turn-key text inference worker for AI Power Grid (multi-backend, OpenAI-compatible)"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,10 @@ dependencies = [
     "uvicorn[standard]>=0.20.0",
     "jinja2>=3.1.0",
     "websockets>=13.0",
+    # Runtime receipt signing is part of the worker provenance contract.
+    "eth-account>=0.11",
+    # Starlette requires this package to parse the dashboard login form.
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

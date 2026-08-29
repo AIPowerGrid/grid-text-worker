@@ -157,7 +157,20 @@ class StreamingWorker:
         self._reconnect_delay = 1
         self._jobs_completed = 0
         self._total_den = 0.0
+        self._session_started = time.monotonic()
         self._job_in_flight = False
+
+    def session_stats(self) -> dict:
+        """Return local, process-lifetime counters for dashboard aggregation."""
+        uptime = max(time.monotonic() - self._session_started, 0.0)
+        hours = uptime / 3600
+        return {
+            "jobs_completed": self._jobs_completed,
+            "den_earned": self._total_den,
+            "jobs_per_hour": self._jobs_completed / hours if hours else 0.0,
+            "den_per_hour": self._total_den / hours if hours else 0.0,
+            "uptime_seconds": uptime,
+        }
 
     def _sign_receipt(self, job_id: str, full_text: str):
         """Sign sha256(result) with the worker's identity key (EIP-191).
@@ -1060,13 +1073,18 @@ async def _run_one(name: str, spec, active_workers: dict[str, StreamingWorker]):
                 active_workers.pop(name)
 
 
-async def run_workers(active_workers: dict[str, StreamingWorker] | None = None):
+async def run_workers(
+    active_workers: dict[str, StreamingWorker] | None = None,
+    expected_workers: set[str] | None = None,
+):
     """Supervisor: across ALL configured backends, keep each backend's
     `effective_concurrency()` parallel connections alive, scaling with schedules.
     One binary, many (backend, model) pairs. concurrency 0 = that backend paused."""
     from .config import load_backends
     if active_workers is None:
         active_workers = {}
+    if expected_workers is None:
+        expected_workers = set()
     backends = load_backends()
     logger.info(
         "serving %d backend(s): %s",
@@ -1088,6 +1106,8 @@ async def run_workers(active_workers: dict[str, StreamingWorker] | None = None):
                 if n != last.get(b.name):
                     logger.info(f"[{b.grid_model_name}] concurrency={n} → {sorted(names) or 'PAUSED'}")
                     last[b.name] = n
+            expected_workers.clear()
+            expected_workers.update(want)
             for nm in want:  # spawn missing / restart any that died
                 t = tasks.get(nm)
                 if t is None or t.done():
@@ -1102,3 +1122,4 @@ async def run_workers(active_workers: dict[str, StreamingWorker] | None = None):
         for t in tasks.values():
             t.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
+        expected_workers.clear()

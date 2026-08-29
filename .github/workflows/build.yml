@@ -124,6 +124,11 @@ jobs:
             --hidden-import inference_worker.gui \
             --hidden-import inference_worker.headless \
             --hidden-import inference_worker.web.routes \
+            --hidden-import python_multipart \
+            --hidden-import multipart \
+            --hidden-import eth_account \
+            --hidden-import eth_account.messages \
+            --copy-metadata py_ecc \
             --hidden-import uvicorn.logging \
             --hidden-import uvicorn.loops.auto \
             --hidden-import uvicorn.protocols.http.auto \
@@ -138,9 +143,11 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             dist/grid-inference-worker.app/Contents/MacOS/grid-inference-worker --help
+            dist/grid-inference-worker.app/Contents/MacOS/grid-inference-worker --verify-runtime
             ARCHIVE=dist/grid-inference-worker.app/Contents/MacOS/grid-inference-worker
           else
             "$BINARY" --help
+            "$BINARY" --verify-runtime
             ARCHIVE="$BINARY"
           fi
           uv run --frozen --extra build pyi-archive_viewer -l "$ARCHIVE" > archive.txt

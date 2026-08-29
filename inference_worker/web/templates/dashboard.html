@@ -12,7 +12,7 @@
   <div class="stats-row" x-show="status.session_stats">
     <div class="stat-card accent">
       <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points/hr</span></div>
-      <div class="stat-value" x-text="formatNum(status.session_stats?.kudos_per_hour)"></div>
+      <div class="stat-value" x-text="formatNum(status.session_stats?.den_per_hour)"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Jobs (session)</div>
@@ -153,7 +153,6 @@ function dashboard() {
     status: {
       worker_running: {{ 'true' if worker_running else 'false' }},
       worker_error: {{ worker_error | tojson }},
-      api_auth_error: null,
       config: null,
     },
     grid: { user: null, worker: null, performance: null, text_stats: null },

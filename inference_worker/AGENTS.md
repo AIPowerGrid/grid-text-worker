@@ -39,6 +39,8 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   `connection_error` reaches the dashboard without remote response bodies.
 - The supervisor optionally exposes its active workers to the dashboard and
   awaits child cleanup before returning, including scheduled scale-down.
+- `eth-account` is a required runtime dependency. Every shipped worker signs
+  result receipts; release binaries must pass `--verify-runtime` before staging.
 - Grid resolves the payout wallet from the authenticated account. The legacy
   local `WALLET_ADDRESS` is not payout authority and must not be presented as such.
 - `service.py` uses `sys.executable` (not pip wrappers), `shlex.quote`s runtime paths, and

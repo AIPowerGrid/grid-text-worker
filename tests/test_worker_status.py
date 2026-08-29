@@ -13,7 +13,7 @@ import pytest
 from inference_worker import ws_client
 from inference_worker.config import Settings
 from inference_worker.web.app import worker_state
-from inference_worker.web.routes import api_status
+from inference_worker.web.routes import _aggregate_session_stats, api_status
 
 
 @pytest.fixture
@@ -126,15 +126,20 @@ async def test_supervisor_waits_for_connections_to_close(worker, monkeypatch):
     monkeypatch.setattr(ws_client, "StreamingWorker", lambda **kwargs: worker)
     monkeypatch.setattr("inference_worker.config.load_backends", lambda: [worker.spec])
     registry = {}
-    task = asyncio.create_task(ws_client.run_workers(active_workers=registry))
+    expected = set()
+    task = asyncio.create_task(
+        ws_client.run_workers(active_workers=registry, expected_workers=expected)
+    )
     try:
         await asyncio.wait_for(started.wait(), 1)
         assert registry == {"test-worker": worker}
+        assert expected == {"test-worker"}
     finally:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
     assert registry == {}
+    assert expected == set()
     worker.backend.aclose.assert_awaited_once()
 
 
@@ -159,6 +164,7 @@ async def test_status_requires_all_active_connections(
     }
     monkeypatch.setitem(worker_state, "running", running)
     monkeypatch.setitem(worker_state, "workers", workers)
+    monkeypatch.setitem(worker_state, "expected_workers", set(workers))
     result = await api_status()
     assert result["grid_connected"] is expected
     assert result["connected_workers"] == (sum(connections) if running else 0)
@@ -172,6 +178,7 @@ async def test_status_exposes_connection_error_without_credentials(worker, monke
     )
     monkeypatch.setitem(worker_state, "running", True)
     monkeypatch.setitem(worker_state, "workers", {worker.name: worker})
+    monkeypatch.setitem(worker_state, "expected_workers", {worker.name})
     monkeypatch.setattr(
         Settings, "GRID_API_KEY", "not-a-real-key-never-return-in-status"
     )
@@ -179,3 +186,35 @@ async def test_status_exposes_connection_error_without_credentials(worker, monke
     assert result["connection_error"] == worker.connection_error
     assert not result["grid_connected"]
     assert Settings.GRID_API_KEY not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+async def test_missing_expected_connection_never_reports_online(monkeypatch):
+    worker = SimpleNamespace(connected=True, connection_error=None, session_stats=lambda: {})
+    monkeypatch.setitem(worker_state, "running", True)
+    monkeypatch.setitem(worker_state, "workers", {"worker-a": worker})
+    monkeypatch.setitem(worker_state, "expected_workers", {"worker-a", "worker-b"})
+    result = await api_status()
+    assert result["connected_workers"] == 1
+    assert result["total_workers"] == 2
+    assert result["grid_connected"] is False
+
+
+def test_session_stats_aggregate_every_active_connection():
+    workers = [
+        SimpleNamespace(session_stats=lambda: {
+            "jobs_completed": 2, "den_earned": 3.5,
+            "jobs_per_hour": 0, "den_per_hour": 0, "uptime_seconds": 1800,
+        }),
+        SimpleNamespace(session_stats=lambda: {
+            "jobs_completed": 1, "den_earned": 1.5,
+            "jobs_per_hour": 0, "den_per_hour": 0, "uptime_seconds": 3600,
+        }),
+    ]
+    assert _aggregate_session_stats(workers) == {
+        "jobs_completed": 3,
+        "den_earned": 5.0,
+        "jobs_per_hour": 3.0,
+        "den_per_hour": 5.0,
+        "uptime_seconds": 3600.0,
+    }

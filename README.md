@@ -45,6 +45,10 @@ Payouts use the account that owns your API key. Manage the payout wallet in
 worker. The legacy local `WALLET_ADDRESS` setting does not set a Grid payout
 destination. Do not enter a wallet private key in this application.
 
+The desktop manager can copy an authenticated dashboard link for another local
+browser. In headless mode, run `grid-inference-worker --show-dashboard-link`
+explicitly; normal startup logs never print the dashboard token.
+
 Once your worker is running, chat with your model at [aipg.chat](https://aipg.chat) — select your model in the upper selector.
 
 ## CLI Flags

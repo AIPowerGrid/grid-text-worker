@@ -92,7 +92,7 @@
         <!-- Backend URL + Model -->
         <div x-show="backends.length > 0 || url_check.reachable">
           <label class="field">
-            <span class="field-label">OpenAI Endpoint</span>
+            <span class="field-label">Backend endpoint</span>
             <div class="input-with-action">
               <input type="text" x-model="config.backend_url" placeholder="http://127.0.0.1:11434">
               <button type="button" class="btn btn-sm btn-outline" @click="checkUrl()" :disabled="checking_url">
@@ -108,7 +108,7 @@
             <div class="field-hint" x-show="url_check.auth_required" style="color: var(--red);">Authentication required — enter your API key below</div>
           </label>
 
-          <label class="field" x-show="config.backend_api_key || url_check.auth_required || config.engine === 'openai-compat'">
+          <label class="field">
             <span class="field-label">API Key <span class="optional">(optional)</span></span>
             <input type="password" x-model="config.backend_api_key" placeholder="sk-..."
                    :style="url_check.auth_required ? 'border-color: var(--red)' : ''">
@@ -170,7 +170,7 @@
             <p class="install-step-label">Connect to OpenAI-Compatible Endpoint</p>
             <p class="field-hint" style="margin-bottom: 0.65rem;">Any local or remote endpoint that speaks the OpenAI API — Ollama, vLLM, LM Studio, OpenAI, Together, Groq, etc.</p>
             <label class="field">
-              <span class="field-label">OpenAI Endpoint</span>
+              <span class="field-label">Backend endpoint</span>
               <div class="input-with-action">
                 <input type="text" x-model="config.backend_url" placeholder="http://localhost:11434 or https://api.together.xyz">
                 <button type="button" class="btn btn-sm btn-outline" @click="checkUrl()" :disabled="checking_url">

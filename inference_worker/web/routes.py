@@ -5,7 +5,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ..config import Settings
-from ..env_utils import ENV_PATH, read_env, write_env, reload_settings
+from ..env_utils import ENV_PATH, write_env, reload_settings
 from ..prompts import ENLISTMENT_PROMPT, strip_thinking_tags
 from ..detect_backends import (
     DetectionResult,
@@ -24,9 +24,51 @@ logger = logging.getLogger(__name__)
 _AUTH_EXEMPT = ("/static", "/login", "/favicon.ico")
 
 
+def _model_test_result(data: object) -> tuple[str, bool, str | None]:
+    """Extract visible output without exposing or mistaking reasoning for an answer."""
+    if not isinstance(data, dict):
+        return "", False, None
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return "", False, None
+    choice = choices[0]
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        return "", False, choice.get("finish_reason")
+    reply = strip_thinking_tags(str(message.get("content") or "")).strip()
+    reasoning = message.get("reasoning") or message.get("thinking")
+    return reply, bool(str(reasoning or "").strip()), choice.get("finish_reason")
+
+
+def _aggregate_session_stats(workers: list[object]) -> dict | None:
+    snapshots = [
+        worker.session_stats()
+        for worker in workers
+        if hasattr(worker, "session_stats")
+    ]
+    if not snapshots:
+        return None
+    uptime = max(float(item.get("uptime_seconds") or 0) for item in snapshots)
+    jobs = sum(int(item.get("jobs_completed") or 0) for item in snapshots)
+    den = sum(float(item.get("den_earned") or 0) for item in snapshots)
+    hours = uptime / 3600
+    return {
+        "jobs_completed": jobs,
+        "den_earned": den,
+        "jobs_per_hour": jobs / hours if hours else 0.0,
+        "den_per_hour": den / hours if hours else 0.0,
+        "uptime_seconds": uptime,
+    }
+
+
 def _safe_next_url(value: object) -> str:
     parsed = urllib.parse.urlsplit(str(value or "/"))
-    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/") or parsed.path.startswith("//"):
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or not parsed.path.startswith("/")
+        or parsed.path.startswith("//")
+    ):
         return "/"
     return urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, ""))
 
@@ -218,11 +260,13 @@ async def api_test_model(request: Request):
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 80,
-        "temperature": 0.8,
+        "max_tokens": 256,
+        "temperature": 0.2,
     }
     if engine == "ollama":
-        payload["think"] = False
+        # Ollama's OpenAI-compatible endpoint maps this to its native Think=false.
+        # The native `think` field is ignored on /v1/chat/completions.
+        payload["reasoning_effort"] = "none"
 
     # Generous timeout — first request may trigger cold model loading (30-60s)
     try:
@@ -236,14 +280,19 @@ async def api_test_model(request: Request):
                         continue
                     return {"ok": False, "error": "Model loading timed out — try again once the model is loaded"}
                 if resp.status_code == 200:
-                    data = resp.json()
-                    choice = data.get("choices", [{}])[0]
-                    reply = (choice.get("message", {}).get("content") or "").strip()
-                    reply = strip_thinking_tags(reply)
-                    if choice.get("finish_reason") == "length":
+                    reply, reasoning_only, finish_reason = _model_test_result(resp.json())
+                    if not reply:
+                        error = (
+                            "Model used the test budget for reasoning without producing a visible reply. "
+                            "The backend is reachable; check its reasoning settings or output limit."
+                            if reasoning_only
+                            else "Model returned an empty reply. Check the model template and output limit."
+                        )
+                        return {"ok": False, "error": error, "prompt": prompt}
+                    if finish_reason == "length":
                         reply += " …"
                     return {"ok": True, "reply": reply, "prompt": prompt}
-                if resp.status_code in (400, 503) and attempt < 2:
+                if resp.status_code == 503 and attempt < 2:
                     await asyncio.sleep(5)
                     continue
                 return {"ok": False, "error": f"HTTP {resp.status_code}"}
@@ -312,25 +361,18 @@ async def dashboard(request: Request):
 @app.get("/api/status")
 async def api_status():
     workers = list(worker_state["workers"].values()) if worker_state["running"] else []
+    expected = set(worker_state["expected_workers"]) if worker_state["running"] else set()
     connected = sum(w.connected for w in workers)
     connection_error = next((w.connection_error for w in workers if w.connection_error), None)
-    session_stats = None
-    api_auth_error = None
-    worker = worker_state.get("worker")
-    if worker and hasattr(worker, "stats"):
-        session_stats = worker.stats.to_dict()
-    if worker and hasattr(worker, "api_auth_error"):
-        api_auth_error = worker.api_auth_error
 
     return {
         "worker_running": worker_state["running"],
-        "grid_connected": bool(workers) and connected == len(workers),
+        "grid_connected": bool(expected) and connected == len(expected),
         "connected_workers": connected,
-        "total_workers": len(workers),
+        "total_workers": len(expected),
         "connection_error": connection_error,
         "worker_error": worker_state.get("error"),
-        "api_auth_error": api_auth_error,
-        "session_stats": session_stats,
+        "session_stats": _aggregate_session_stats(workers),
         "config": {
             "has_api_key": bool(Settings.GRID_API_KEY),
             "worker_name": Settings.GRID_WORKER_NAME,
@@ -342,7 +384,6 @@ async def api_status():
             "max_length": Settings.MAX_LENGTH,
             "max_context_length": Settings.MAX_CONTEXT_LENGTH,
             "nsfw": Settings.NSFW,
-            "wallet_address": Settings.WALLET_ADDRESS,
         },
     }
 
@@ -380,7 +421,6 @@ async def settings_page(request: Request):
             "GRID_MAX_THREADS": str(Settings.MAX_THREADS),
             "GRID_MAX_LENGTH": str(Settings.MAX_LENGTH),
             "GRID_MAX_CONTEXT_LENGTH": str(Settings.MAX_CONTEXT_LENGTH),
-            "WALLET_ADDRESS": Settings.WALLET_ADDRESS,
         },
     })
 

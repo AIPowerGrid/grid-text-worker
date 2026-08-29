@@ -114,6 +114,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - Every frozen platform must pass `scripts/verify-bundled-ca.py` during build.
   `--help` alone does not verify the default Grid TLS path or onboarding. Linux
   x64 targets Ubuntu 22.04+; the ARM64 build targets Ubuntu 24.04+.
+- Every frozen platform also runs `--verify-runtime`, which imports dashboard
+  form parsing and performs an in-memory EIP-191 sign/recover proof. A binary
+  missing `python-multipart` or `eth-account` is not releasable.
 
 ## Child DOX Index
 

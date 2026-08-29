@@ -1,15 +1,14 @@
 import asyncio
 import logging
+import sys
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..config import Settings
 from ..env_utils import is_configured, ensure_dashboard_token
 
 logger = logging.getLogger(__name__)
@@ -36,8 +35,6 @@ def setup_log_capture():
     logging.getLogger().addHandler(handler)
 
 
-import sys
-
 if getattr(sys, "frozen", False):
     # Running as PyInstaller bundle — data files are in sys._MEIPASS
     WEB_DIR = Path(sys._MEIPASS) / "inference_worker" / "web"
@@ -50,8 +47,8 @@ STATIC_DIR = WEB_DIR / "static"
 worker_state = {
     "running": False,
     "task": None,
-    "worker": None,
     "workers": {},
+    "expected_workers": set(),
     "error": None,
     "setup_complete": False,
 }
@@ -60,13 +57,16 @@ worker_state = {
 async def _run_worker():
     """Run every configured backend over the Grid WebSocket."""
     from ..ws_client import run_workers
-    worker_state["worker"] = None
     worker_state["workers"] = {}
+    worker_state["expected_workers"] = set()
     worker_state["running"] = True
     worker_state["error"] = None
     logger.info("⚡ Streaming mode — connecting backend(s) via WebSocket")
     try:
-        await run_workers(active_workers=worker_state["workers"])
+        await run_workers(
+            active_workers=worker_state["workers"],
+            expected_workers=worker_state["expected_workers"],
+        )
     except asyncio.CancelledError:
         logger.info("Worker task cancelled.")
     except Exception:
@@ -75,6 +75,7 @@ async def _run_worker():
     finally:
         worker_state["running"] = False
         worker_state["workers"].clear()
+        worker_state["expected_workers"].clear()
 
 
 async def start_worker():
