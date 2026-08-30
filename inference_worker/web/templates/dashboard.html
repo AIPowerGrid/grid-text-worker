@@ -6,13 +6,13 @@
 
 {% block content %}
 <div x-data="dashboard()" x-init="poll()"
-     @worker-status.window="status = $event.detail">
+     @worker-status.window="applyStatus($event.detail)">
 
   <!-- Live session stats (from worker memory) -->
   <div class="stats-row" x-show="status.session_stats">
     <div class="stat-card accent">
       <div class="stat-label"><span class="hint" title="Den is the Grid work-accounting unit recorded for accepted jobs. Den per hour is an operational rate, not a token amount or payout forecast.">Den/hr</span></div>
-      <div class="stat-value" x-text="formatNum(status.session_stats?.den_per_hour)"></div>
+      <div class="stat-value" x-text="formatRate(sessionRates.den_per_hour)"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Jobs (session)</div>
@@ -20,7 +20,7 @@
     </div>
     <div class="stat-card">
       <div class="stat-label">Jobs/hr</div>
-      <div class="stat-value" x-text="formatNum(status.session_stats?.jobs_per_hour)"></div>
+      <div class="stat-value" x-text="formatRate(sessionRates.jobs_per_hour)"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Session</div>
@@ -156,6 +156,25 @@ function dashboard() {
       config: null,
     },
     grid: { user: null, worker: null, performance: null, text_stats: null },
+    sessionRates: { den_per_hour: null, jobs_per_hour: null },
+    sessionRatesCaptured: false,
+
+    applyStatus(nextStatus) {
+      this.status = nextStatus;
+      if (!this.sessionRatesCaptured && nextStatus.session_stats) {
+        this.sessionRates = {
+          den_per_hour: nextStatus.session_stats.den_per_hour,
+          jobs_per_hour: nextStatus.session_stats.jobs_per_hour,
+        };
+        this.sessionRatesCaptured = true;
+      }
+    },
+
+    formatRate(n) {
+      const value = Number(n);
+      if (!Number.isFinite(value)) return '—';
+      return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    },
 
     formatNum(n) {
       if (n == null) return '—';

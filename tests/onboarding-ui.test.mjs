@@ -48,6 +48,10 @@ test('dashboard presents den as work accounting, not money', () => {
   assert.ok(dashboard.includes('operational rate, not a token amount or payout forecast'));
   assert.ok(dashboard.includes('>Den recorded</span>'));
   assert.ok(!dashboard.includes('Points/hr'));
+  assert.match(dashboard, /formatRate\(sessionRates\.den_per_hour\)/);
+  assert.match(dashboard, /formatRate\(sessionRates\.jobs_per_hour\)/);
+  assert.match(dashboard, /maximumFractionDigits: 1/);
+  assert.match(dashboard, /!this\.sessionRatesCaptured/);
   assert.ok(!dashboard.toLowerCase().includes(['ku', 'dos'].join('')));
 });
 
