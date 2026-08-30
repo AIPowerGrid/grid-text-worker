@@ -24,6 +24,9 @@ production canary.
   exception details.
 - Existing multi-backend and parallel operators retain the advanced scoped-key
   path because one enrolled credential cannot impersonate several workers.
+- Dashboard Den/hr and Jobs/hr rates are rounded to one decimal place and
+  captured once per page load, so the cards stay readable instead of drifting
+  every few seconds as session uptime changes.
 
 ## Release Gate
 
