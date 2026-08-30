@@ -57,7 +57,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   authoritative in a multi-backend process.
 - Dashboard den labels describe accepted work accounting. `den_per_hour` is a
   process-lifetime operational rate, not a token balance, conversion rate, or
-  payout forecast.
+  payout forecast. The two hourly rate cards are rounded to one decimal and
+  snapshot the first status response for the page; refresh the page to update
+  them instead of letting elapsed-time polling make them visibly drift.
 - Setup waits for confirmed registration after saving. A rejection or bounded
   wait failure exposes Logs, never a timed success animation. Retrying setup
   restarts the previous worker so corrected credentials actually take effect.
