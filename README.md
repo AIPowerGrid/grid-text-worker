@@ -16,6 +16,12 @@ identified in the manifest and release notes so operators can make an informed
 choice. Published releases are immutable; corrections are issued as a new
 version rather than replacing a tag or binary.
 
+The current public release is `v0.3.6`. It uses a scoped Grid API key created in
+the developer Console. Source `0.3.7` contains the native Console enrollment
+candidate, but that path is not public until the matching Core and Console
+services pass a supervised production canary and `v0.3.7` is explicitly
+announced.
+
 | Platform | File |
 |----------|------|
 | Windows x64 | `grid-inference-worker-windows-x64.exe` |
@@ -30,14 +36,18 @@ version rather than replacing a tag or binary.
 **Linux** — `chmod +x grid-inference-worker-linux-x64 && ./grid-inference-worker-linux-x64`
 
 No Python or dependencies needed. Just install a backend (Ollama is easiest),
-run the worker, and follow the wizard. For a normal single-model worker, enter a
-worker name and choose **Connect Grid account**. The worker opens Console for
-Google or wallet sign-in and installs a worker-only credential after approval;
-the generated key never enters the browser and cannot spend credits or manage
-your account.
+run the worker, and follow the wizard. With public `v0.3.6`, create a scoped Grid
+API key in the
+[developer Console](https://console.aipowergrid.io/dashboard/api-key) and enter
+it during setup. Do not expect **Connect Grid account** to work until `v0.3.7`
+is published after its production enrollment canary.
 
-Advanced multi-backend or parallel operators can instead use an existing Grid
-API key from the [developer console](https://console.aipowergrid.io/dashboard/api-key).
+Once announced, `v0.3.7` will make **Connect Grid account** the normal
+single-model path: the worker opens Console for human approval and installs a
+worker-only credential without returning the generated key to the browser.
+Advanced multi-backend or parallel operators will continue to use an existing
+Grid API key because each enrolled credential is bound to one exact worker
+name.
 
 The wizard confirms a Grid registration before reporting success. A running
 process alone is not an online worker. The dashboard distinguishes connecting,
@@ -45,8 +55,9 @@ partially connected, online, and unavailable status. If setup cannot confirm a
 connection, open Logs and check the backend, API key, and worker name; saving
 configuration does not prove a job has completed.
 
-Payouts use the account that approved the worker credential or owns the API key.
-Manage the payout wallet in
+Payouts use the account that owns the API key. After native enrollment is
+released, they use the account that approved the worker credential. Manage the
+payout wallet in
 [console settings](https://console.aipowergrid.io/dashboard/settings), not in the
 worker. The legacy local `WALLET_ADDRESS` setting does not set a Grid payout
 destination. Do not enter a wallet private key in this application.
@@ -89,8 +100,8 @@ Copy `.env.example` to `.env` and fill in your values, or configure through the 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GRID_API_KEY` | *(required unless enrolled)* | Grid API key for advanced/manual setup ([create one](https://console.aipowergrid.io/dashboard/api-key)) |
-| `GRID_ENROLLED_WORKER_NAME` | | Exact worker name installed by secure Console enrollment; do not set manually |
+| `GRID_API_KEY` | *(required by public v0.3.6)* | Scoped Grid API key ([create one](https://console.aipowergrid.io/dashboard/api-key)); remains the advanced path after native enrollment ships |
+| `GRID_ENROLLED_WORKER_NAME` | | Exact worker name installed by the staged secure Console enrollment; do not set manually |
 | `MODEL_NAME` | | Model to serve (e.g. `llama3.2:3b`) |
 | `BACKEND_TYPE` | `ollama` | `ollama` or `openai` |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama endpoint |
