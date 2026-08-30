@@ -55,6 +55,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   makes status unavailable rather than preserving a stale Online badge.
 - Session counters aggregate every active connection; no singular worker slot is
   authoritative in a multi-backend process.
+- Dashboard den labels describe accepted work accounting. `den_per_hour` is a
+  process-lifetime operational rate, not a token balance, conversion rate, or
+  payout forecast.
 - Setup waits for confirmed registration after saving. A rejection or bounded
   wait failure exposes Logs, never a timed success animation. Retrying setup
   restarts the previous worker so corrected credentials actually take effect.

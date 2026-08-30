@@ -11,7 +11,7 @@
   <!-- Live session stats (from worker memory) -->
   <div class="stats-row" x-show="status.session_stats">
     <div class="stat-card accent">
-      <div class="stat-label"><span class="hint" title="電 (den) — points earned for completed jobs and uptime. From Japanese 電 meaning electricity/power.">Points/hr</span></div>
+      <div class="stat-label"><span class="hint" title="Den is the Grid work-accounting unit recorded for accepted jobs. Den per hour is an operational rate, not a token amount or payout forecast.">Den/hr</span></div>
       <div class="stat-value" x-text="formatNum(status.session_stats?.den_per_hour)"></div>
     </div>
     <div class="stat-card">
@@ -31,7 +31,7 @@
   <!-- Lifetime stats from Grid API -->
   <div class="stats-row" x-show="grid.worker">
     <div class="stat-card">
-      <div class="stat-label"><span class="hint" title="Den is the Grid work unit recorded for completed jobs.">Den Lifetime</span></div>
+      <div class="stat-label"><span class="hint" title="Den is the Grid work-accounting unit recorded for accepted jobs, not a token balance.">Den recorded</span></div>
       <div class="stat-value" x-text="formatNum(grid.worker?.den_earned)"></div>
     </div>
     <div class="stat-card">
@@ -124,7 +124,7 @@
         <span class="config-value" x-text="grid.user?.username || '—'"></span>
       </div>
       <div class="config-item">
-          <span class="config-label"><span class="hint" title="Den is the Grid work unit recorded for completed jobs.">Den earned</span></span>
+          <span class="config-label"><span class="hint" title="Den is the Grid work-accounting unit recorded for accepted jobs, not a token balance.">Den recorded</span></span>
           <span class="config-value" x-text="formatNum(grid.user?.den_earned)"></span>
       </div>
       <div class="config-item">
