@@ -17,7 +17,8 @@ The underlying immutable assets are also available from
 [Releases](https://github.com/AIPowerGrid/grid-text-worker/releases):
 
 Release candidates include `SHA256SUMS`, `worker-release.json`, an SPDX SBOM,
-and GitHub build-provenance attestations. The candidate manifest records
+the checksum-verifying Linux installer, and GitHub build-provenance
+attestations. The candidate manifest records
 macOS and Windows signing state explicitly. Every release requires supervised
 staging; platform signing is recommended but optional. Unsigned builds are
 identified in the manifest and release notes so operators can make an informed
@@ -42,6 +43,12 @@ announced.
 **macOS** — Unzip, then open `Grid Inference Worker.app`.
 
 **Linux** — `chmod +x grid-inference-worker-linux-x64 && ./grid-inference-worker-linux-x64`
+
+Beginning with the staged `v0.3.7` candidate, Linux operators can download
+`install-worker.sh` from the same release, inspect it, and run it. The script
+selects x64 or ARM64, verifies the binary and release manifest against
+`SHA256SUMS`, and installs to `~/.local/bin` without starting the worker or
+asking for credentials. It is not a `curl | sh` installer.
 
 No Python or dependencies needed. Just install a backend (Ollama is easiest),
 run the worker, and follow the wizard. With public `v0.3.6`, create a scoped Grid

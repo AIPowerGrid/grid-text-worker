@@ -28,6 +28,11 @@ def _write_payload(root: Path, mac_member: str | None = None) -> None:
         "grid-inference-worker-release.spdx.json": json.dumps(
             {"spdxVersion": "SPDX-2.3"}
         ).encode(),
+        "install-worker.sh": (
+            b'#!/usr/bin/env bash\nRELEASE_TAG="v0.3.5"\n'
+            b"https://github.com/AIPowerGrid/grid-text-worker/releases/download/\n"
+            b"sha256sum\n"
+        ),
     }
     for name, content in payloads.items():
         (root / name).write_bytes(content)
@@ -116,4 +121,32 @@ def test_missing_platform_signing_state_is_rejected(tmp_path: Path) -> None:
     )
 
     with pytest.raises(SystemExit, match="platform-signing state"):
+        release_verifier.verify(tmp_path)
+
+
+def test_cross_version_installer_is_rejected(tmp_path: Path) -> None:
+    _write_payload(tmp_path)
+    installer = tmp_path / "install-worker.sh"
+    installer.write_text(
+        installer.read_text(encoding="utf-8").replace("v0.3.5", "v9.9.9"),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "worker-release.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    installer_row = next(
+        item for item in manifest["assets"] if item["name"] == "install-worker.sh"
+    )
+    installer_row["sha256"] = hashlib.sha256(installer.read_bytes()).hexdigest()
+    installer_row["bytes"] = installer.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    checksum_lines = []
+    for name in release_verifier.CHECKSUMMED:
+        digest = hashlib.sha256((tmp_path / name).read_bytes()).hexdigest()
+        checksum_lines.append(f"{digest}  {name}")
+    (tmp_path / "SHA256SUMS").write_text(
+        "\n".join(checksum_lines) + "\n",
+        encoding="ascii",
+    )
+
+    with pytest.raises(SystemExit, match="installer identity"):
         release_verifier.verify(tmp_path)

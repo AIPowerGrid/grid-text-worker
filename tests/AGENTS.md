@@ -13,7 +13,10 @@ does not currently prove a live backend-to-Grid job lifecycle.
   boundaries, real login form parsing/cookies, model-test response handling,
   dashboard-link clipboard behavior, and frozen-runtime dependency checks.
 - `test_release_assets.py` - offline release payload, checksum, and archive
-  safety verification.
+  safety verification, including exact installer/release identity.
+- `test_linux_installer.py` - mocked-host Linux install, checksum-tamper
+  rejection, executable permissions, and proof that installation never starts
+  the worker.
 - `test_worker_status.py` - mocked ready/rejected registration, disconnect and
   supervisor cleanup, multi-backend status, and credential-safe reporting.
 - `test_enrollment.py` - Console device enrollment, private pending-state

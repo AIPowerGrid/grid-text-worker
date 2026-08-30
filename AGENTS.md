@@ -49,6 +49,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   detection, service install, CLI/GUI. Owned in its own AGENTS.md.
 - `run_worker.py` / `run_frozen.py` — thin launchers (dev / PyInstaller entry).
 - `scripts/`, `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build (no DOX child).
+- `scripts/install-worker.sh` — release-stamped, checksum-verifying Linux
+  installer. It installs the immutable x64/ARM64 binary without executing it,
+  collecting credentials, or changing worker configuration.
 - `.github/workflows/`, `.gitleaks.toml`, and `.gitleaksignore` — build/test
   automation plus checksum-verified tracked-tree and complete reachable-history
   scanning. Historical exceptions are exact reviewed fingerprints only, and CI
@@ -117,6 +120,10 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   be tagged or published until the matching Core enrollment API and Console
   approval flow pass one supervised production canary. Building a candidate on
   `main` does not prove those separate services are deployed.
+- The Linux installer is part of the checksummed release payload and manifest.
+  It must remain bound to the exact release tag, fixed GitHub repository, and
+  Linux x64/ARM64 assets; it never pipes downloads to a shell or starts the
+  installed worker.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
   `http://localhost:7861` without exposing the token in the settled browser URL.
 - Every frozen platform must pass `scripts/verify-bundled-ca.py` during build.
