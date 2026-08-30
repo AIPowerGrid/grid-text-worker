@@ -22,6 +22,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   layouts; requires the build extra. The release CI also checks actual binaries.
 - `onboarding-ui.test.mjs` - Node built-in tests of the actual template scripts:
   bounded setup polling, rejection, unavailable status, and account links.
+  It also keeps dashboard den labels on the work-accounting boundary and out of
+  retired reward or earnings-rate language.
 
 ## Local Contracts
 

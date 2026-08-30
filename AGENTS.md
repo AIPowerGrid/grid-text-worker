@@ -80,6 +80,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - **Config is env-only** via `inference_worker/config.py:Settings`; never read env elsewhere.
 - **The dashboard is local by default.** It binds to loopback; `--host 0.0.0.0`
   is an explicit operator opt-in and never disables token authentication.
+- Den is a work-accounting unit recorded for accepted jobs. Operator-facing
+  docs and dashboard labels must not present it as currency, a fixed payout
+  rate, or a guaranteed earnings estimate; CI rejects retired reward terminology.
 - Run from `grid-core`'s prod tree on servers; this repo produces the distributable binary.
 
 ## Work Guidance

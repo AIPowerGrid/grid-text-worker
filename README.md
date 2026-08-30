@@ -1,12 +1,20 @@
 # Grid Inference Worker
 
-Turn-key text inference worker for [AI Power Grid](https://aipowergrid.io). Run a local model, connect to the Grid, and start earning.
+Turn-key text inference worker for [AI Power Grid](https://aipowergrid.io). Run
+a local model, connect to the Grid, and serve paid inference jobs.
 
 ![Setup Wizard](assets/screenshot.png)
 
 ## Download
 
-Grab the latest binary for your platform from [Releases](https://github.com/AIPowerGrid/grid-text-worker/releases):
+Start at the [verified operator onboarding page](https://aipowergrid.io/run).
+It checks the immutable release envelope before exposing a platform download,
+shows current model demand and worker redundancy, and provides a public online
+worker check. Linux operators who want to add independent capacity can join the
+[open text-worker cohort](https://github.com/AIPowerGrid/grid-text-worker/issues/10).
+
+The underlying immutable assets are also available from
+[Releases](https://github.com/AIPowerGrid/grid-text-worker/releases):
 
 Release candidates include `SHA256SUMS`, `worker-release.json`, an SPDX SBOM,
 and GitHub build-provenance attestations. The candidate manifest records
@@ -61,6 +69,12 @@ payout wallet in
 [console settings](https://console.aipowergrid.io/dashboard/settings), not in the
 worker. The legacy local `WALLET_ADDRESS` setting does not set a Grid payout
 destination. Do not enter a wallet private key in this application.
+
+Den is the Grid's work-accounting unit for accepted jobs, not a token amount or
+fixed exchange rate. Demand, routing, measured work, availability, competition,
+and settlement all affect results. Use the live workload and payout evidence on
+[`/run`](https://aipowergrid.io/run); it is historical evidence, not an earnings
+or ROI guarantee.
 
 The desktop manager can copy an authenticated dashboard link for another local
 browser. In headless mode, run `grid-inference-worker --show-dashboard-link`

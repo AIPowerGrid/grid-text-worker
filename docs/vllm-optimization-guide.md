@@ -217,7 +217,7 @@ python -m vllm.entrypoints.openai.api_server \
 
 ### 2. Model Selection Best Practices
 
-**For Grid Worker earnings optimization:**
+**For local backend tuning:**
 
 | Goal | Recommended Model | VRAM | Expected Performance |
 |------|-------------------|------|---------------------|
@@ -226,7 +226,11 @@ python -m vllm.entrypoints.openai.api_server \
 | **Quality** | Mistral-7B-v0.3 | 16GB | 20-30 tok/s |
 | **Premium** | Llama-2-13B-AWQ | 16GB | 15-25 tok/s |
 
-Higher tok/s → more jobs/hour → more kudos
+These are local inference examples, not Grid route names. Advertise only the
+exact model that your backend actually serves and that the Grid currently
+accepts. Higher throughput can improve a worker's ability to complete jobs, but
+it does not guarantee routing, den, or payout. Check current capacity and
+30-day workload evidence at [aipowergrid.io/run](https://aipowergrid.io/run).
 
 ### 3. Trust Remote Code
 
@@ -421,10 +425,13 @@ curl http://localhost:7861/api/stats
 ```
 
 Key metrics:
-- `kudos_per_hour`: Earnings rate
-- `jobs_per_hour`: Throughput
-- `jobs_completed`: Total processed
-- `jobs_failed`: Error rate (should be <1%)
+- `den_per_hour`: Accepted work units per process-hour; not a currency or payout rate
+- `jobs_per_hour`: Completed jobs per process-hour
+- `jobs_completed`: Completed jobs in the current process session
+- `uptime_seconds`: Current process-session duration used by the rate denominator
+
+Use the public payout ledger for settled payment evidence. Local session rates
+are operational signals only and must not be presented as an earnings forecast.
 
 ## Production Best Practices
 
@@ -643,9 +650,10 @@ Before going to production:
 1. Use vLLM's model swapping (future feature)
 2. Or run separate Grid Workers per model
 
-### Scenario 4: Cost Optimization
+### Scenario 4: Resource Efficiency
 
-**Goal:** Minimize GPU cost per kudos
+**Goal:** Reduce GPU cost per successful, compatible generation without
+sacrificing quality or reliability.
 
 **Use smallest capable model:**
 ```bash
@@ -656,8 +664,10 @@ Before going to production:
 ```
 
 **Measure efficiency:**
-- Kudos per GPU hour = `kudos_per_hour` (from dashboard)
-- Cost efficiency = `kudos_per_hour / GPU_hourly_cost`
+- Jobs and den per process-hour come from the local dashboard.
+- Settled AIPG transfers come from the public payout ledger, not a local estimate.
+- Compare actual power and hosting cost with settled history over a meaningful
+  window; do not infer a fixed den-to-AIPG rate or guaranteed utilization.
 
 ## Troubleshooting Performance
 

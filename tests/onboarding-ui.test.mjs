@@ -10,6 +10,7 @@ const templates = new URL('../inference_worker/web/templates/', import.meta.url)
 const setup = readFileSync(new URL('setup.html', templates), 'utf8');
 const base = readFileSync(new URL('base.html', templates), 'utf8');
 const settings = readFileSync(new URL('settings.html', templates), 'utf8');
+const dashboard = readFileSync(new URL('dashboard.html', templates), 'utf8');
 
 function instantiate(html, factory, fetch) {
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
@@ -40,6 +41,14 @@ test('backend credentials remain editable and labels are backend-neutral', () =>
   assert.ok(!setup.includes('x-show="config.backend_api_key ||'));
   assert.ok(setup.includes('Backend endpoint'));
   assert.ok(!setup.includes('OpenAI Endpoint'));
+});
+
+test('dashboard presents den as work accounting, not money', () => {
+  assert.ok(dashboard.includes('>Den/hr</span>'));
+  assert.ok(dashboard.includes('operational rate, not a token amount or payout forecast'));
+  assert.ok(dashboard.includes('>Den recorded</span>'));
+  assert.ok(!dashboard.includes('Points/hr'));
+  assert.ok(!dashboard.toLowerCase().includes(['ku', 'dos'].join('')));
 });
 
 test('backend detection supplies a machine-specific worker-name suggestion', async () => {
