@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from inference_worker.cli import _verify_runtime_dependencies
 from inference_worker.config import Settings
+from inference_worker.enrollment import EnrollmentClientError
 from inference_worker.gui import _copy_to_clipboard
 from inference_worker.web.app import app
 from inference_worker.web.app import worker_state
@@ -160,6 +161,37 @@ def test_blank_settings_secret_fields_preserve_existing_values(
     assert response.status_code == 200
     assert captured["write"] == {"MODEL_NAME": "gpt-oss-20b"}
     assert captured["reload"] == captured["write"]
+
+
+def test_enrollment_routes_do_not_expose_internal_errors(
+    dashboard_client, monkeypatch
+):
+    async def fail_start(**_kwargs):
+        raise EnrollmentClientError(
+            "worker enrollment request failed: private-host.internal SECRET_FILE_LOCATION"
+        )
+
+    async def fail_poll():
+        raise EnrollmentClientError("cannot resume SECRET_PENDING_LOCATION")
+
+    monkeypatch.setattr("inference_worker.web.routes.start_enrollment", fail_start)
+    monkeypatch.setattr("inference_worker.web.routes.poll_enrollment", fail_poll)
+    dashboard_client.cookies.set("_token", "dashboard-test-token")
+
+    started = dashboard_client.post(
+        "/api/setup/enrollment/start",
+        json={"worker_name": "Text-Inference-Worker-test", "restart": False},
+    )
+    polled = dashboard_client.post("/api/setup/enrollment/poll")
+
+    assert started.status_code == 400
+    assert polled.status_code == 400
+    encoded = started.text + polled.text
+    assert "private-host.internal" not in encoded
+    assert "SECRET_FILE_LOCATION" not in encoded
+    assert "SECRET_PENDING_LOCATION" not in encoded
+    assert started.json()["error"].startswith("Could not create worker approval")
+    assert polled.json()["error"].startswith("Could not finish worker approval")
 
 
 @pytest.mark.parametrize(

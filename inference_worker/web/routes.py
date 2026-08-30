@@ -377,7 +377,14 @@ async def api_start_enrollment(request: Request):
             restart=bool(body.get("restart", False)),
         )
     except EnrollmentClientError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        logger.warning("worker enrollment start failed: %s", exc)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Could not create worker approval. Check the Grid connection and try again.",
+            },
+            status_code=400,
+        )
     return {"ok": True, **result}
 
 
@@ -387,7 +394,14 @@ async def api_poll_enrollment():
     try:
         result = await poll_enrollment()
     except EnrollmentClientError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        logger.warning("worker enrollment poll failed: %s", exc)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Could not finish worker approval. Start a new Console connection and try again.",
+            },
+            status_code=400,
+        )
     return {"ok": True, **result}
 
 
