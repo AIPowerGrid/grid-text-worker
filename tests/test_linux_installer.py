@@ -6,6 +6,7 @@ import hashlib
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 INSTALLER = Path(__file__).parents[1] / "scripts" / "install-worker.sh"
@@ -71,6 +72,19 @@ esac
         encoding="utf-8",
     )
     uname.chmod(0o755)
+    sha256sum = commands / "sha256sum"
+    sha256sum.write_text(
+        f"""#!{sys.executable}
+import hashlib
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+print(hashlib.sha256(path.read_bytes()).hexdigest(), path)
+""",
+        encoding="utf-8",
+    )
+    sha256sum.chmod(0o755)
     return commands
 
 
