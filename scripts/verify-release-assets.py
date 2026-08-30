@@ -18,6 +18,7 @@ PAYLOADS = (
     "grid-inference-worker-macos-arm64.zip",
     "grid-inference-worker-windows-x64.exe",
     "grid-inference-worker-release.spdx.json",
+    "install-worker.sh",
 )
 CHECKSUMMED = (*PAYLOADS, "worker-release.json")
 
@@ -123,6 +124,19 @@ def verify(root: Path) -> None:
     )
     if not str(sbom.get("spdxVersion") or "").startswith("SPDX-"):
         _die("release SBOM is not SPDX JSON")
+
+    installer = (root / "install-worker.sh").read_text(encoding="utf-8")
+    installer_tag = tag or f"v{version}"
+    if (
+        not installer.startswith("#!/usr/bin/env bash\n")
+        or "__AIPG_WORKER_RELEASE_TAG__" in installer
+        or installer.count(f'RELEASE_TAG="{installer_tag}"') != 1
+        or "https://github.com/AIPowerGrid/grid-text-worker/releases/download/"
+        not in installer
+        or "sha256sum" not in installer
+        or re.search(r"\|\s*(?:ba)?sh\b", installer)
+    ):
+        _die("Linux installer identity or safety contract is invalid")
 
 
 def main() -> None:

@@ -213,12 +213,23 @@ jobs:
           import pathlib
 
           root = pathlib.Path("release-assets")
+          release_tag = os.environ["RELEASE_TAG"] or f"v{os.environ['RELEASE_VERSION']}"
+          installer = pathlib.Path("scripts/install-worker.sh").read_text(encoding="utf-8")
+          marker = "__AIPG_WORKER_RELEASE_TAG__"
+          if installer.count(marker) != 1:
+              raise SystemExit("worker installer release marker is missing or duplicated")
+          (root / "install-worker.sh").write_text(
+              installer.replace(marker, release_tag),
+              encoding="utf-8",
+          )
+          (root / "install-worker.sh").chmod(0o755)
           names = [
               "grid-inference-worker-linux-x64",
               "grid-inference-worker-linux-arm64",
               "grid-inference-worker-macos-arm64.zip",
               "grid-inference-worker-windows-x64.exe",
               "grid-inference-worker-release.spdx.json",
+              "install-worker.sh",
           ]
           assets = []
           for name in names:

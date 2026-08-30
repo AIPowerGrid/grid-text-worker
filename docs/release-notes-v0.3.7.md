@@ -7,6 +7,10 @@ production canary.
 
 ## Operator Changes
 
+- The release includes `install-worker.sh` for Linux x64/ARM64. It is stamped
+  to the exact release tag, checksummed and listed in the release manifest,
+  verifies downloads before an atomic non-root install, and never starts the
+  worker or accepts credentials.
 - A normal setup generates the worker's signing identity and candidate Grid key
   locally, then opens a short-lived Console approval URL.
 - The generated Grid key never enters browser JavaScript or a Console response.

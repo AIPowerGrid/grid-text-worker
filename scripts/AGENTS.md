@@ -15,11 +15,16 @@ splash assets for the distributable text worker.
   release payload.
 - `verify-bundled-ca.py` - checks one-file and onedir/macOS binaries contain the
   exact reviewed public WebSocket CA certificate and that OpenSSL can load it.
+- `install-worker.sh` - release-stamped Linux x64/ARM64 installer. It downloads
+  from the fixed Grid worker release, verifies the binary and manifest against
+  `SHA256SUMS`, and installs atomically without running or configuring it.
 
 ## Local Contracts
 
 - Release artifacts must not embed `.env`, API keys, payout wallets, local
   paths, signing material, or backend credentials.
+- The Linux installer must not accept credentials, auto-execute the downloaded
+  worker, permit an alternate release host, or use a download-to-shell pattern.
 - Keep package entrypoints and data-file inclusion aligned with the Python CLI,
   local web UI, version metadata, and release workflow.
 - All build paths include `inference_worker/certs`. The public Cloudflare Origin
