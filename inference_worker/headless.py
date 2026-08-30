@@ -5,11 +5,50 @@ import getpass
 import json
 import sys
 import textwrap
+import time
+import webbrowser
 
 from .config import Settings
 from .env_utils import ENV_PATH, is_configured, write_env, reload_settings
 from .prompts import ENLISTMENT_PROMPT, strip_thinking_tags
 from . import service
+
+
+async def _authorize_grid_worker(worker_name: str) -> dict:
+    """Complete Console device enrollment without exposing the generated key."""
+    from .enrollment import EnrollmentClientError, poll_enrollment, start_enrollment
+
+    try:
+        enrollment = await start_enrollment(
+            grid_api_url=Settings.GRID_API_URL,
+            worker_name=worker_name,
+        )
+    except EnrollmentClientError as exc:
+        raise RuntimeError(f"could not create worker approval: {exc}") from exc
+
+    approval_url = enrollment["authorize_url"]
+    print()
+    print("  Open this secure Console approval link:")
+    print(f"  {approval_url}")
+    try:
+        webbrowser.open(approval_url, new=2)
+    except Exception:
+        pass
+    print("  Waiting for approval", end="", flush=True)
+
+    expires_at = int(enrollment["expires_at"])
+    delay = int(enrollment.get("poll_after_seconds", 2))
+    while int(time.time()) < expires_at:
+        await asyncio.sleep(delay)
+        try:
+            result = await poll_enrollment()
+        except EnrollmentClientError as exc:
+            raise RuntimeError(f"worker approval failed: {exc}") from exc
+        print(".", end="", flush=True)
+        if result.get("status") == "activated":
+            print(" approved.")
+            return result
+    raise RuntimeError("worker approval expired; run setup again to create a new link")
 
 
 def _slug(s: str) -> str:
@@ -86,8 +125,8 @@ def _configure_backend(n: int, detection=None) -> dict | None:
         for i, be in enumerate(detection.backends, 1):
             tag = f" (v{be.version})" if be.version else ""
             print(f"    [{i}] {be.name} @ {be.url}{tag}")
-        print(f"    [m] Enter a different URL (remote endpoint)")
-        choice = input(f"\n  Use backend [1]: ").strip().lower()
+        print("    [m] Enter a different URL (remote endpoint)")
+        choice = input("\n  Use backend [1]: ").strip().lower()
         if choice in ("", *(str(i) for i in range(1, len(detection.backends) + 1))):
             b = detection.backends[(int(choice) - 1) if choice else 0]
             base_url = _norm_openai_base(b.url)
@@ -129,7 +168,7 @@ def _configure_backend(n: int, detection=None) -> dict | None:
             print(f"    [{i}] {m}")
         if len(models) > 20:
             print(f"    … and {len(models) - 20} more")
-        sel = input(f"  Select model [1] (or type a name): ").strip()
+        sel = input("  Select model [1] (or type a name): ").strip()
         if not sel:
             model = models[0]
         elif sel.isdigit() and 1 <= int(sel) <= len(models[:20]):
@@ -211,17 +250,39 @@ def quick_setup() -> dict:
         if entry:
             backends.append(entry)
 
-    # --- Grid API key (one account key powers all backends) ---
-    print()
-    print("  ── Grid account " + "─" * 33)
-    api_key = getpass.getpass("  Grid API key (dashboard.aipowergrid.io): ").strip()
-    if not api_key:
-        print("  No API key provided. Exiting.")
-        sys.exit(1)
-
     from .config import default_worker_name
     suggested = default_worker_name()
     worker_name = input(f"  Worker name [{suggested}]: ").strip() or suggested
+
+    # Console enrollment binds one credential to one exact connection name.
+    # Multi-backend and parallel operators intentionally keep the advanced
+    # account-key path until Core supports a safe set of worker identities.
+    simple_worker = len(backends) == 1 and backends[0]["concurrency"] == 1
+    print()
+    print("  ── Grid account " + "─" * 33)
+    credential_mode = "manual"
+    api_key = ""
+    if simple_worker:
+        choice = input("  Connect securely through Console? [Y/m for manual key]: ").strip().lower()
+        if choice != "m":
+            try:
+                asyncio.run(_authorize_grid_worker(worker_name))
+                credential_mode = "console"
+                backends[0]["name"] = worker_name
+            except (RuntimeError, KeyboardInterrupt) as exc:
+                print(f"\n  {exc}")
+                print("  Falling back to advanced manual-key setup.")
+    else:
+        print("  Multiple backends or parallel slots require an advanced account API key.")
+        print("  Worker-only Console enrollment currently binds one exact connection name.")
+
+    if credential_mode == "manual":
+        api_key = getpass.getpass(
+            "  Existing Grid API key (console.aipowergrid.io/dashboard/api-key): "
+        ).strip()
+        if not api_key:
+            print("  No API key provided. Exiting.")
+            sys.exit(1)
 
     print()
     print("  Connection: streaming WebSocket")
@@ -229,7 +290,6 @@ def quick_setup() -> dict:
     # --- Assemble config ---
     first_b = backends[0]
     config = {
-        "GRID_API_KEY": api_key,
         "GRID_WORKER_NAME": worker_name,
         "GRID_BACKENDS": json.dumps(backends),
         # Back-compat single-backend vars (also satisfy is_configured()).
@@ -237,6 +297,10 @@ def quick_setup() -> dict:
         "MODEL_NAME": first_b["model"],
         "GRID_MODEL_NAME": first_b["grid_model"],
     }
+    if credential_mode == "manual":
+        config["GRID_API_KEY"] = api_key
+    else:
+        config["GRID_ENROLLED_WORKER_NAME"] = worker_name
     if first_b["type"] == "ollama":
         config["OLLAMA_URL"] = first_b["url"]
     else:
@@ -247,7 +311,12 @@ def quick_setup() -> dict:
     # --- Summary ---
     print()
     print("  ── Summary " + "─" * 38)
-    print(f"  Worker:  {worker_name}   (WebSocket)")
+    credential_label = (
+        "Console worker-only credential"
+        if credential_mode == "console"
+        else "advanced account key"
+    )
+    print(f"  Worker:  {worker_name}   (WebSocket, {credential_label})")
     for i, b in enumerate(backends, 1):
         print(f"    {i}. {b['model']:<28} → {b['grid_model']} (x{b['concurrency']})")
     print()
@@ -305,7 +374,6 @@ def run(args):
     print("  Starting worker...")
     print()
 
-    from .config import Settings
     if Settings.P2P_ENABLED:
         # P2P mode uses trio (not asyncio)
         from .p2p_client import run_p2p_worker

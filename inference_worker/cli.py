@@ -162,9 +162,13 @@ def main():
 
     def wait_for_server():
         import urllib.request
+        # Probe the address uvicorn actually binds by default. On systems where
+        # localhost resolves to ::1 first, probing localhost can otherwise wait
+        # the full 30 seconds while the IPv4 dashboard is already healthy.
+        probe_host = "[::1]" if host == "::1" else "127.0.0.1"
         for _ in range(60):
             try:
-                urllib.request.urlopen(f"{url}/login", timeout=1)
+                urllib.request.urlopen(f"http://{probe_host}:{port}/login", timeout=1)
                 ready.set()
                 return
             except Exception:
@@ -183,12 +187,12 @@ def main():
     else:
         # Console mode: wait for ready, print URL, auto-open browser
         logger = logging.getLogger(__name__)
-        ready.wait(timeout=30)
-        logger.info(f"Dashboard: {url}")
-        logger.info("Use --show-dashboard-link to copy access into another browser.")
-        if _has_display():
-            webbrowser.open(auth_url)
         try:
+            ready.wait(timeout=30)
+            logger.info(f"Dashboard: {url}")
+            logger.info("Use --show-dashboard-link to copy access into another browser.")
+            if _has_display():
+                webbrowser.open(auth_url)
             server_thread.join()
         except KeyboardInterrupt:
             print("\n  Shutting down...")

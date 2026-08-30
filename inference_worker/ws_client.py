@@ -20,6 +20,11 @@ import websockets
 
 from . import vision_probe
 from .config import Settings
+from .worker_identity import (
+    WorkerIdentityError,
+    build_registration_proof,
+    get_signer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,51 +69,6 @@ def _extract_usage(obj) -> dict | None:
     if not u and isinstance(obj.get("response"), dict):
         u = obj["response"].get("usage")
     return u if isinstance(u, dict) else None
-
-
-_SIGNER = None
-_SIGNER_LOADED = False
-
-
-def _load_or_create_signer():
-    """Load (or generate) the worker's funds-LESS signing identity.
-
-    A dedicated signing keypair (NOT the payout wallet — no funds ever live on
-    the rig) used to sign per-job result receipts. From GRID_SIGNER_KEY, else
-    persisted at ~/.aipg/worker_signer.key (0600), else generated once.
-    Returns an eth_account Account, or None if eth-account isn't installed."""
-    try:
-        from eth_account import Account
-    except ImportError:
-        logger.warning("eth-account not installed — result receipts disabled (pip install eth-account)")
-        return None
-    import os
-    try:
-        pk = os.getenv("GRID_SIGNER_KEY", "").strip()
-        if pk:
-            return Account.from_key(pk)
-        path = os.path.expanduser("~/.aipg/worker_signer.key")
-        if os.path.exists(path):
-            return Account.from_key(open(path).read().strip())
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        acct = Account.create()
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(acct.key.hex())
-        logger.info(f"generated worker signing identity {acct.address} → {path}")
-        return acct
-    except Exception as e:
-        logger.warning(f"signer init failed: {e}")
-        return None
-
-
-def get_signer():
-    """Cached singleton — all parallel connections share one box identity."""
-    global _SIGNER, _SIGNER_LOADED
-    if not _SIGNER_LOADED:
-        _SIGNER = _load_or_create_signer()
-        _SIGNER_LOADED = True
-    return _SIGNER
 
 
 class BackendUnavailable(ConnectionError):
@@ -159,6 +119,28 @@ class StreamingWorker:
         self._total_den = 0.0
         self._session_started = time.monotonic()
         self._job_in_flight = False
+
+    def _registration_identity(self) -> dict | None:
+        """Build the fresh proof required by a Console-enrolled rig key."""
+        enrolled_name = Settings.GRID_ENROLLED_WORKER_NAME
+        if not enrolled_name:
+            return None
+        if self.name != enrolled_name:
+            raise WorkerIdentityError(
+                "Console-enrolled credentials are bound to one worker name; "
+                "use a separate enrollment or an advanced account key for multi-backend mode"
+            )
+        proof = build_registration_proof(
+            worker_name=self.name,
+            models=[self.grid_model_name],
+            job_types=["text"],
+            bridge_agent=BRIDGE_AGENT,
+        )
+        if proof is None:
+            raise WorkerIdentityError(
+                "Console-enrolled worker delegation is missing; reconnect this rig in setup"
+            )
+        return proof
 
     def session_stats(self) -> dict:
         """Return local, process-lifetime counters for dashboard aggregation."""
@@ -403,8 +385,9 @@ class StreamingWorker:
             close_timeout=5,
         )
 
-        # Send registration message
-        await self.ws.send(json.dumps({
+        # Send registration message. Console-enrolled workers attach a fresh,
+        # capability-bound proof; advanced manual keys keep the legacy shape.
+        registration = {
             "apikey": Settings.GRID_API_KEY,
             "name": self.name,
             "models": [self.grid_model_name],
@@ -414,7 +397,11 @@ class StreamingWorker:
             "modalities": self.modalities,
             "signer_address": self.signer_address,
             "bridge_agent": BRIDGE_AGENT,
-        }))
+        }
+        identity = self._registration_identity()
+        if identity is not None:
+            registration["worker_identity"] = identity
+        await self.ws.send(json.dumps(registration))
 
         # Wait for ready response
         response = json.loads(await asyncio.wait_for(self.ws.recv(), timeout=30))

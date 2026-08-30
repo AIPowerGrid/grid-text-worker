@@ -23,6 +23,10 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   dir), `env_utils.py` (.env read/write + dashboard token), `cli.py` (argparse entry, GUI vs
   console), `gui.py` (Tkinter window), `headless.py` (terminal quick-setup), `service.py`
   (systemd / launchd / Windows-startup install).
+- **Worker identity / enrollment:** `worker_identity.py` owns the funds-less rig
+  signer, payout-wallet delegation verification, and capability-bound WS proof.
+  `enrollment.py` owns the crash-resumable Console approval flow and installs an
+  exact-name worker-only API key without returning it to browser JavaScript.
 - `web/` — browser setup wizard + dashboard. Owned in its own AGENTS.md.
 
 ## Local Contracts
@@ -41,6 +45,13 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   awaits child cleanup before returning, including scheduled scale-down.
 - `eth-account` is a required runtime dependency. Every shipped worker signs
   result receipts; release binaries must pass `--verify-runtime` before staging.
+- Secure Console enrollment is the default for a single backend with one
+  connection. It binds the API key, delegation, worker signer, and exact worker
+  name. Multi-backend or parallel operators use the explicit advanced account
+  API-key path until Core supports a safely scoped set of connection names.
+- Enrollment state and the rig signer are local secrets: write atomically with
+  mode `0600` where supported, reject symlinks, require HTTPS off loopback, and
+  never return candidate API keys or poll tokens through the local web API.
 - Grid resolves the payout wallet from the authenticated account. The legacy
   local `WALLET_ADDRESS` is not payout authority and must not be presented as such.
 - `service.py` uses `sys.executable` (not pip wrappers), `shlex.quote`s runtime paths, and

@@ -5,6 +5,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ..config import Settings
+from ..enrollment import EnrollmentClientError, poll_enrollment, start_enrollment
 from ..env_utils import ENV_PATH, write_env, reload_settings
 from ..prompts import ENLISTMENT_PROMPT, strip_thinking_tags
 from ..detect_backends import (
@@ -93,6 +94,22 @@ def _validated_backend_settings(value: object) -> dict:
         if key in form and form[key]:
             form[key] = validated_backend_url(form[key])
     return form
+
+
+def _enrolled_settings_error(form: dict) -> str | None:
+    """Keep exact-name Console credentials within their issued capability."""
+    enrolled_name = Settings.GRID_ENROLLED_WORKER_NAME
+    if not enrolled_name:
+        return None
+    if form.get("GRID_WORKER_NAME", enrolled_name) != enrolled_name:
+        return "Console-enrolled credentials cannot rename this worker; reconnect the rig instead"
+    try:
+        max_threads = int(form.get("GRID_MAX_THREADS", Settings.MAX_THREADS))
+    except (TypeError, ValueError):
+        return "Max Threads must be an integer"
+    if max_threads != 1:
+        return "Console-enrolled credentials support one connection; use an advanced account key for parallel slots"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +215,7 @@ async def api_detect():
     detection = await asyncio.to_thread(detect_backends)
     return {
         "found": detection.found,
+        "worker_name": Settings.GRID_WORKER_NAME,
         "ollama_binary": detection.ollama_binary,
         "ollama_version": detection.ollama_version,
         "backends": [
@@ -331,6 +349,8 @@ async def api_complete_setup(request: Request):
         form = _validated_backend_settings(await request.json())
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
+    if error := _enrolled_settings_error(form):
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
 
     write_env(form)
     reload_settings(form)
@@ -344,6 +364,45 @@ async def api_complete_setup(request: Request):
 
     logger.info("Setup complete. Worker starting.")
     return {"ok": True}
+
+
+@app.post("/api/setup/enrollment/start")
+async def api_start_enrollment(request: Request):
+    """Create or resume a worker-only credential approval in Console."""
+    body = await request.json()
+    try:
+        result = await start_enrollment(
+            grid_api_url=Settings.GRID_API_URL,
+            worker_name=str(body.get("worker_name") or ""),
+            restart=bool(body.get("restart", False)),
+        )
+    except EnrollmentClientError as exc:
+        logger.warning("worker enrollment start failed: %s", exc)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Could not create worker approval. Check the Grid connection and try again.",
+            },
+            status_code=400,
+        )
+    return {"ok": True, **result}
+
+
+@app.post("/api/setup/enrollment/poll")
+async def api_poll_enrollment():
+    """Advance the local enrollment without exposing its candidate key."""
+    try:
+        result = await poll_enrollment()
+    except EnrollmentClientError as exc:
+        logger.warning("worker enrollment poll failed: %s", exc)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Could not finish worker approval. Start a new Console connection and try again.",
+            },
+            status_code=400,
+        )
+    return {"ok": True, **result}
 
 
 # ---------------------------------------------------------------------------
@@ -409,12 +468,13 @@ async def settings_page(request: Request):
     return templates.TemplateResponse(request, "settings.html", {
         "request": request,
         "settings": {
-            "GRID_API_KEY": Settings.GRID_API_KEY,
+            "HAS_GRID_API_KEY": bool(Settings.GRID_API_KEY),
+            "GRID_ENROLLED_WORKER_NAME": Settings.GRID_ENROLLED_WORKER_NAME,
             "GRID_WORKER_NAME": Settings.GRID_WORKER_NAME,
             "BACKEND_TYPE": Settings.BACKEND_TYPE,
             "OLLAMA_URL": Settings.OLLAMA_URL,
             "OPENAI_URL": Settings.OPENAI_URL,
-            "OPENAI_API_KEY": Settings.OPENAI_API_KEY,
+            "HAS_OPENAI_API_KEY": bool(Settings.OPENAI_API_KEY),
             "MODEL_NAME": Settings.MODEL_NAME,
             "GRID_MODEL_NAME": Settings.GRID_MODEL_NAME,
             "GRID_NSFW": str(Settings.NSFW).lower(),
@@ -432,6 +492,14 @@ async def save_settings(request: Request):
         form = _validated_backend_settings(await request.json())
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
+    if error := _enrolled_settings_error(form):
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+
+    # Empty secret inputs mean "keep the stored value". Stored credentials are
+    # never serialized into Settings-page HTML merely to support editing.
+    for secret_name in ("GRID_API_KEY", "OPENAI_API_KEY"):
+        if not form.get(secret_name):
+            form.pop(secret_name, None)
 
     write_env(form, delete_empty=True)
     reload_settings(form)

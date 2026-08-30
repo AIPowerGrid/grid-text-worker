@@ -3,7 +3,7 @@
 import os
 import sys
 
-from .config import Settings, CONFIG_DIR, ENV_FILE
+from .config import ENV_FILE, Settings
 
 ENV_PATH = ENV_FILE
 
@@ -44,6 +44,7 @@ def reload_settings(config: dict):
     """Push a config dict into the in-memory Settings class."""
     _STR = {
         "GRID_API_KEY": "GRID_API_KEY",
+        "GRID_ENROLLED_WORKER_NAME": "GRID_ENROLLED_WORKER_NAME",
         "GRID_WORKER_NAME": "GRID_WORKER_NAME",
         "BACKEND_TYPE": "BACKEND_TYPE",
         "OLLAMA_URL": "OLLAMA_URL",

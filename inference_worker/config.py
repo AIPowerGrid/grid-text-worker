@@ -62,6 +62,9 @@ def default_worker_name() -> str:
 
 class Settings:
     GRID_API_KEY = os.getenv("GRID_API_KEY", "")
+    # Set only by the Console device-enrollment flow. It binds the worker-only
+    # credential and payout delegation to one exact rig name.
+    GRID_ENROLLED_WORKER_NAME = os.getenv("GRID_ENROLLED_WORKER_NAME", "")
     # `or` (not getenv default) so an explicitly-empty env var still gets a name.
     GRID_WORKER_NAME = os.getenv("GRID_WORKER_NAME") or default_worker_name()
     GRID_API_URL = os.getenv("GRID_API_URL", "https://api.aipowergrid.io")
