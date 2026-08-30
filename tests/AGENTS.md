@@ -16,6 +16,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   safety verification.
 - `test_worker_status.py` - mocked ready/rejected registration, disconnect and
   supervisor cleanup, multi-backend status, and credential-safe reporting.
+- `test_enrollment.py` - Console device enrollment, private pending-state
+  persistence, delegation verification, and capability-bound registration.
 - `test_bundled_ca.py` - public CA inclusion checks for onefile and onedir
   layouts; requires the build extra. The release CI also checks actual binaries.
 - `onboarding-ui.test.mjs` - Node built-in tests of the actual template scripts:

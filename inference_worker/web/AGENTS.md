@@ -60,6 +60,11 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   restarts the previous worker so corrected credentials actually take effect.
 - API-key and payout-wallet setup link to the console. Do not request wallet
   connections locally or claim the legacy wallet field controls rewards.
+- `/api/setup/enrollment/start` and `/api/setup/enrollment/poll` drive the
+  default Console device flow. They may return public approval state only;
+  candidate keys, poll tokens, delegation files, and dashboard tokens must
+  never enter template state or JSON responses. An error retry explicitly
+  replaces stale pending state. Manual account keys remain an Advanced option.
 - The native manager may copy the authenticated dashboard link only after an
   explicit operator action. Ordinary startup logs show the token-free local URL;
   the web dashboard and status APIs never render or return the token.

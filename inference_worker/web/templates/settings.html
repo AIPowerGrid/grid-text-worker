@@ -12,14 +12,36 @@
     <div>
     <div class="card">
       <h2>Grid API</h2>
-      <label class="field">
-        <span class="field-label">API Key</span>
-        <input type="password" x-model="form.GRID_API_KEY" placeholder="Your AI Power Grid API key">
-        <div class="field-hint">Don't have one? <a href="https://console.aipowergrid.io/dashboard/api-key" target="_blank" rel="noopener">Create an API key in Console</a></div>
-      </label>
+      <template x-if="enrolledWorkerName">
+        <div class="field">
+          <span class="field-label">Console worker credential</span>
+          <div class="detect-status">
+            <div class="status-icon success">&#10003;</div>
+            <strong x-text="enrollment.status === 'activated' ? 'Credential renewed' : 'Worker-only key installed'"></strong>
+          </div>
+          <div class="field-hint" style="margin-top: 0.55rem;">Bound to <strong x-text="enrolledWorkerName"></strong>. The key is never returned to this page.</div>
+          <button type="button" class="btn btn-sm btn-outline" style="margin-top: 0.7rem;"
+                  @click="reconnectGridAccount()" :disabled="enrollment.busy">
+            <span x-show="!enrollment.busy">Reconnect through Console</span>
+            <span x-show="enrollment.busy"><span class="spinner-sm"></span> Waiting for approval...</span>
+          </button>
+          <a x-show="enrollment.authorize_url" :href="enrollment.authorize_url" target="_blank" rel="noopener"
+             class="btn btn-sm btn-outline" style="margin-top: 0.7rem;">Open approval page</a>
+          <div x-show="enrollment.error" class="field-hint" style="color: var(--red); margin-top: 0.55rem;" x-text="enrollment.error"></div>
+        </div>
+      </template>
+      <template x-if="!enrolledWorkerName">
+        <label class="field">
+          <span class="field-label">API Key</span>
+          <input type="password" x-model="form.GRID_API_KEY"
+                 :placeholder="hasGridApiKey ? 'Configured — enter a replacement' : 'grid_...'">
+          <div class="field-hint">The stored key is never returned to this page. <a href="https://console.aipowergrid.io/dashboard/api-key" target="_blank" rel="noopener">Manage keys in Console</a>.</div>
+        </label>
+      </template>
       <label class="field" style="margin-bottom: 0;">
         <span class="field-label">Worker Name</span>
-        <input type="text" x-model="form.GRID_WORKER_NAME" placeholder="Text-Inference-Worker">
+        <input type="text" x-model="form.GRID_WORKER_NAME" placeholder="Text-Inference-Worker"
+               :disabled="Boolean(enrolledWorkerName)">
       </label>
     </div>
 
@@ -44,7 +66,9 @@
           </label>
           <label class="field" style="margin-bottom: 0;">
             <span class="field-label">API Key <span class="optional">(if required)</span></span>
-            <input type="password" x-model="form.OPENAI_API_KEY" placeholder="">
+            <input type="password" x-model="form.OPENAI_API_KEY"
+                   :placeholder="hasOpenAiApiKey ? 'Configured — enter a replacement' : ''">
+            <div class="field-hint" x-show="hasOpenAiApiKey">The stored backend key is not returned to this page.</div>
           </label>
         </div>
       </template>
@@ -70,7 +94,9 @@
       <h2>Limits</h2>
       <label class="field">
         <span class="field-label">Max Threads</span>
-        <input type="number" x-model="form.GRID_MAX_THREADS" min="1" max="16">
+        <input type="number" x-model="form.GRID_MAX_THREADS" min="1"
+               :max="enrolledWorkerName ? 1 : 16" :disabled="Boolean(enrolledWorkerName)">
+        <div class="field-hint" x-show="enrolledWorkerName">Worker-only credentials are bound to one exact connection. Parallel operators use an advanced account key.</div>
       </label>
       <label class="field">
         <span class="field-label">Max Length (tokens)</span>
@@ -105,7 +131,7 @@
         </span>
       </div>
       <div class="wallet-body">
-        <p class="field-hint">Payouts use the Grid account that owns your API key.</p>
+        <p class="field-hint">Payouts use the Grid account that approved this worker or owns its advanced API key.</p>
         <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Manage payout wallet</a>
       </div>
     </div>
@@ -127,19 +153,62 @@ function settingsForm() {
   return {
     saving: false,
     saved: false,
+    hasGridApiKey: {{ settings.HAS_GRID_API_KEY | tojson }},
+    hasOpenAiApiKey: {{ settings.HAS_OPENAI_API_KEY | tojson }},
+    enrolledWorkerName: {{ settings.GRID_ENROLLED_WORKER_NAME | tojson }},
+    enrollment: { status: 'idle', busy: false, error: '', authorize_url: '' },
     form: {
-      GRID_API_KEY: {{ settings.GRID_API_KEY | tojson }},
+      GRID_API_KEY: '',
       GRID_WORKER_NAME: {{ settings.GRID_WORKER_NAME | tojson }},
       BACKEND_TYPE: {{ settings.BACKEND_TYPE | tojson }},
       OLLAMA_URL: {{ settings.OLLAMA_URL | tojson }},
       OPENAI_URL: {{ settings.OPENAI_URL | tojson }},
-      OPENAI_API_KEY: {{ settings.OPENAI_API_KEY | tojson }},
+      OPENAI_API_KEY: '',
       MODEL_NAME: {{ settings.MODEL_NAME | tojson }},
       GRID_MODEL_NAME: {{ settings.GRID_MODEL_NAME | tojson }},
       GRID_NSFW: {{ settings.GRID_NSFW | tojson }},
       GRID_MAX_THREADS: {{ settings.GRID_MAX_THREADS | tojson }},
       GRID_MAX_LENGTH: {{ settings.GRID_MAX_LENGTH | tojson }},
       GRID_MAX_CONTEXT_LENGTH: {{ settings.GRID_MAX_CONTEXT_LENGTH | tojson }},
+    },
+    async reconnectGridAccount() {
+      this.enrollment = { status: 'pending', busy: true, error: '', authorize_url: '' };
+      try {
+        const started = await fetch('/api/setup/enrollment/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worker_name: this.enrolledWorkerName, restart: true }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const state = await started.json();
+        if (!started.ok || !state.ok) throw new Error(state.error || 'Could not create worker approval');
+        this.enrollment.authorize_url = state.authorize_url;
+        window.open(state.authorize_url, '_blank', 'noopener');
+        const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+        for (let attempt = 0; attempt < 450; attempt++) {
+          await wait(2000);
+          const polled = await fetch('/api/setup/enrollment/poll', {
+            method: 'POST',
+            signal: AbortSignal.timeout(30000),
+          });
+          const result = await polled.json();
+          if (!polled.ok || !result.ok) throw new Error(result.error || 'Worker approval failed');
+          if (result.status === 'activated') {
+            this.enrollment.status = 'activated';
+            this.enrollment.busy = false;
+            this.enrollment.authorize_url = '';
+            await fetch('/api/worker/restart', { method: 'POST' });
+            return;
+          }
+        }
+        throw new Error('Worker approval expired. Try again.');
+      } catch (error) {
+        this.enrollment.status = 'error';
+        this.enrollment.busy = false;
+        this.enrollment.error = error.name === 'TimeoutError'
+          ? 'Console connection timed out. Try again.'
+          : error.message || 'Could not reconnect this worker';
+      }
     },
     async save() {
       this.saving = true;

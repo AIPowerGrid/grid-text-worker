@@ -9,6 +9,7 @@ import vm from 'node:vm';
 const templates = new URL('../inference_worker/web/templates/', import.meta.url);
 const setup = readFileSync(new URL('setup.html', templates), 'utf8');
 const base = readFileSync(new URL('base.html', templates), 'utf8');
+const settings = readFileSync(new URL('settings.html', templates), 'utf8');
 
 function instantiate(html, factory, fetch) {
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
@@ -16,7 +17,7 @@ function instantiate(html, factory, fetch) {
   assert.ok(script);
   const context = vm.createContext({
     fetch, AbortSignal, setTimeout: callback => queueMicrotask(callback),
-    setInterval: () => {}, window: { dispatchEvent() {} }, CustomEvent: class {},
+    setInterval: () => {}, window: { dispatchEvent() {}, open() {} }, CustomEvent: class {},
   });
   vm.runInContext(script, context);
   return vm.runInContext(`${factory}()`, context);
@@ -39,6 +40,80 @@ test('backend credentials remain editable and labels are backend-neutral', () =>
   assert.ok(!setup.includes('x-show="config.backend_api_key ||'));
   assert.ok(setup.includes('Backend endpoint'));
   assert.ok(!setup.includes('OpenAI Endpoint'));
+});
+
+test('backend detection supplies a machine-specific worker-name suggestion', async () => {
+  const wizard = instantiate(setup, 'setupWizard', async url => {
+    assert.equal(url, '/api/setup/detect');
+    return response({
+      found: false,
+      worker_name: 'Text-Inference-Worker-host-7f91',
+      backends: [],
+    });
+  });
+  await wizard.runDetect();
+  assert.equal(wizard.config.worker_name, 'Text-Inference-Worker-host-7f91');
+});
+
+test('settings never hydrate stored API keys into browser state', () => {
+  assert.ok(!settings.includes('settings.GRID_API_KEY'));
+  assert.ok(!settings.includes('settings.OPENAI_API_KEY'));
+  assert.ok(settings.includes("GRID_API_KEY: ''"));
+  assert.ok(settings.includes("OPENAI_API_KEY: ''"));
+  assert.ok(settings.includes('Reconnect through Console'));
+});
+
+test('secure Console enrollment is the default and keeps the key out of browser state', async () => {
+  const calls = [];
+  const wizard = instantiate(setup, 'setupWizard', async (url, options) => {
+    calls.push([url, options?.body ? JSON.parse(options.body) : null]);
+    if (url === '/api/setup/enrollment/start') {
+      return response({
+        ok: true,
+        status: 'pending',
+        authorize_url: 'https://console.aipowergrid.io/dashboard/connect-worker/enrollment_abcdefghijklmnopqrstuvwxyz',
+        worker_name: 'Text-Inference-Worker-test',
+      });
+    }
+    if (url === '/api/setup/enrollment/poll') {
+      return response({ ok: true, status: 'activated', worker_name: 'Text-Inference-Worker-test' });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  });
+  wizard.config.worker_name = 'Text-Inference-Worker-test';
+  await wizard.connectGridAccount();
+  assert.equal(wizard.credential_mode, 'console');
+  assert.equal(wizard.enrollment.status, 'activated');
+  assert.equal(wizard.config.api_key, '');
+  assert.deepEqual(calls.map(([url]) => url), [
+    '/api/setup/enrollment/start',
+    '/api/setup/enrollment/poll',
+  ]);
+  assert.deepEqual(calls[0][1], {
+    worker_name: 'Text-Inference-Worker-test',
+    restart: false,
+  });
+});
+
+test('retrying a failed Console enrollment replaces stale pending state', async () => {
+  const calls = [];
+  const wizard = instantiate(setup, 'setupWizard', async (url, options) => {
+    calls.push([url, options?.body ? JSON.parse(options.body) : null]);
+    if (url === '/api/setup/enrollment/start') {
+      return response({
+        ok: true,
+        status: 'pending',
+        authorize_url: 'https://console.aipowergrid.io/dashboard/connect-worker/enrollment_abcdefghijklmnopqrstuvwxyz',
+        worker_name: 'Text-Inference-Worker-test',
+      });
+    }
+    return response({ ok: true, status: 'activated', worker_name: 'Text-Inference-Worker-test' });
+  });
+  wizard.config.worker_name = 'Text-Inference-Worker-test';
+  wizard.enrollment.status = 'error';
+  await wizard.connectGridAccount(true);
+  assert.equal(wizard.enrollment.status, 'activated');
+  assert.equal(calls[0][1].restart, true);
 });
 
 test('saving configuration and a running process do not imply Grid acceptance', async () => {
