@@ -110,6 +110,10 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   payload. Branch protection requires the final payload job, so the exact
   releasable tip cannot bypass binary smoke, SBOM, checksum, and manifest
   verification through a path-filtered change.
+- A release that makes native Console enrollment the normal setup path must not
+  be tagged or published until the matching Core enrollment API and Console
+  approval flow pass one supervised production canary. Building a candidate on
+  `main` does not prove those separate services are deployed.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
   `http://localhost:7861` without exposing the token in the settled browser URL.
 - Every frozen platform must pass `scripts/verify-bundled-ca.py` during build.
