@@ -1,9 +1,8 @@
-# Text Worker v0.3.7 Candidate
+# Text Worker v0.3.7
 
-This candidate adds secure Console-assisted enrollment for ordinary
-single-model workers. It is staged source, not a public release, until the
-matching Core enrollment API and Console approval flow pass a supervised
-production canary.
+This release adds secure Console-assisted enrollment for ordinary single-model
+workers. The matching Core enrollment API and Console approval flow passed a
+supervised production canary before the release tag was created.
 
 ## Operator Changes
 
@@ -28,9 +27,9 @@ production canary.
   captured once per page load, so the cards stay readable instead of drifting
   every few seconds as session uptime changes.
 
-## Release Gate
+## Release Evidence
 
-Do not create or publish tag `v0.3.7` until all of the following are true:
+The release was gated on all of the following:
 
 1. The exact reviewed Core release containing worker enrollment is deployed.
 2. The matching Console approval routes are deployed without exposing service
@@ -40,16 +39,17 @@ Do not create or publish tag `v0.3.7` until all of the following are true:
    worker registry.
 4. Denial, expiry, replay, wrong-name registration, and reconnect behavior are
    verified against production.
-5. The candidate's four-platform build, runtime self-check, checksum manifest,
-   SPDX SBOM, and GitHub provenance checks pass at the tagged commit.
+5. The four-platform build, runtime self-check, checksum manifest, SPDX SBOM,
+   and GitHub provenance checks pass at the tagged commit.
 
-If the service rollout is unavailable, operators must remain on public
-`v0.3.6` and use a scoped API key from the developer Console.
+The production canary exercised 19 checks. It proved valid enrollment and
+reconnect behavior while also rejecting the wrong poll token, wrong payout
+signature, wrong worker name, replayed registration proof, and a revoked key.
+The disposable worker key was revoked after the registry check.
 
 ## Platform Trust
 
 - Linux x64 and ARM64 remain the only platforms exposed by the public `/run`
   release gate while their complete release envelope verifies.
 - Windows is unsigned and macOS is not notarized. Their manifest state and
-  installation warnings must remain explicit if the candidate is later
-  published.
+  installation warnings remain explicit in this release.
