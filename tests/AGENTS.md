@@ -18,7 +18,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   rejection, executable permissions, and proof that installation never starts
   the worker.
 - `test_worker_status.py` - mocked ready/rejected registration, disconnect and
-  supervisor cleanup, multi-backend status, and credential-safe reporting.
+  supervisor cleanup, multi-backend status, credential-safe reporting, and
+  preservation of validator protocol fields in structured backend requests.
 - `test_enrollment.py` - Console device enrollment, private pending-state
   persistence, delegation verification, and capability-bound registration.
 - `test_bundled_ca.py` - public CA inclusion checks for onefile and onedir

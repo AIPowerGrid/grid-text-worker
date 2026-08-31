@@ -40,6 +40,31 @@ def worker(monkeypatch):
     return w
 
 
+def test_structured_request_preserves_validator_protocol_fields(worker):
+    stop = "<STOP_7A9C>"
+    payload = {
+        "request": {
+            "model": "grid/test-model",
+            "messages": [{"role": "user", "content": "protocol probe"}],
+            "max_tokens": 211,
+            "temperature": 0,
+            "stop": stop,
+            "stream": False,
+        },
+    }
+
+    request, faithful = worker._build_backend_request("job-validator", payload)
+
+    assert faithful is True
+    assert request["model"] == "test-model"
+    assert request["stream"] is True
+    assert request["max_tokens"] == 211
+    assert request["stop"] == stop
+    assert request["temperature"] == 0
+    assert request["messages"] == payload["request"]["messages"]
+    assert request["stream_options"]["include_usage"] is True
+
+
 @pytest.mark.asyncio
 async def test_only_ready_handshake_marks_connected(worker, monkeypatch):
     ws = AsyncMock()
