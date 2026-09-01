@@ -81,6 +81,22 @@ explicitly; normal startup logs never print the dashboard token.
 
 Once your worker is running, chat with your model at [aipg.chat](https://aipg.chat) — select your model in the upper selector.
 
+## Help Validate the Grid
+
+Already run persistent infrastructure? AI Power Grid is recruiting two more
+unrelated Linux/systemd or persistent Docker operators for the initial
+validator cohort. The validator is CPU-only: it does not require a GPU, stake,
+or a worker, and preview validators have no routing, reward, strike, or slashing
+authority.
+
+Each candidate must complete a 72-hour evidence window before it can qualify.
+Multiple nodes controlled by the same person or organization count as one
+independent operator, including when that operator also runs Grid workers.
+Start at [aipowergrid.io/validate](https://aipowergrid.io/validate), then post
+only your public `val_*` status ID in the
+[qualification cohort issue](https://github.com/AIPowerGrid/grid-validator/issues/5).
+Never post an API key or private key.
+
 ## CLI Flags
 
 Override config from the command line. The web dashboard is always available at `http://localhost:7861` regardless of how you start the worker.
