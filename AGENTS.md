@@ -77,6 +77,10 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   `/v1/workers/ws` receives pushed jobs and streams tokens back. No HTTP polling
   client or transport-selection flag is shipped. P2P (`P2P_ENABLED`) is
   experimental scaffolding.
+- Structured OpenAI requests preserve `logprobs` and `top_logprobs`. When a
+  backend returns native streaming logprobs, the worker relays them unchanged
+  with that token frame; it does not synthesize or score them. Core owns
+  bounding and validator evidence policy.
 - **Multi-backend supervisor:** `GRID_BACKENDS` fans out one worker per configured backend from
   a single process. Declared `input_modalities` (e.g. vision) flow to the grid `/v1/models`
   surface; the WS carries `cancel` frames that abort an in-flight backend request.

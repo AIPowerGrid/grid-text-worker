@@ -48,6 +48,8 @@ def test_structured_request_preserves_validator_protocol_fields(worker):
             "messages": [{"role": "user", "content": "protocol probe"}],
             "max_tokens": 211,
             "temperature": 0,
+            "logprobs": True,
+            "top_logprobs": 10,
             "stop": stop,
             "stream": False,
         },
@@ -61,8 +63,70 @@ def test_structured_request_preserves_validator_protocol_fields(worker):
     assert request["max_tokens"] == 211
     assert request["stop"] == stop
     assert request["temperature"] == 0
+    assert request["logprobs"] is True
+    assert request["top_logprobs"] == 10
     assert request["messages"] == payload["request"]["messages"]
     assert request["stream_options"]["include_usage"] is True
+
+
+@pytest.mark.asyncio
+async def test_stream_relay_preserves_native_logprobs(worker, monkeypatch):
+    logprobs = {
+        "content": [{
+            "token": " hello",
+            "logprob": -0.1,
+            "top_logprobs": [{"token": " hello", "logprob": -0.1}],
+        }],
+    }
+
+    class Response:
+        status_code = 200
+
+        async def aiter_lines(self):
+            yield "data: " + json.dumps({
+                "choices": [{
+                    "delta": {"content": "hello"},
+                    "logprobs": logprobs,
+                    "finish_reason": "stop",
+                }],
+            })
+            yield "data: [DONE]"
+
+    class Stream:
+        async def __aenter__(self):
+            return Response()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    worker.ws = AsyncMock()
+    worker.ws.recv.return_value = json.dumps({"type": "ack", "den": 0})
+    worker.backend.stream = lambda *_args, **_kwargs: Stream()
+    monkeypatch.setattr(
+        worker,
+        "_start_cancel_watcher",
+        lambda *_args: asyncio.create_task(asyncio.sleep(60)),
+    )
+    monkeypatch.setattr(worker, "_sign_receipt", lambda *_args: None)
+
+    await worker._handle_job({
+        "id": "job-logprobs",
+        "model": "grid/test-model",
+        "payload": {
+            "request": {
+                "model": "grid/test-model",
+                "messages": [{"role": "user", "content": "test"}],
+                "max_tokens": 8,
+                "temperature": 0,
+                "logprobs": True,
+                "top_logprobs": 10,
+            },
+        },
+    })
+
+    sent = [json.loads(call.args[0]) for call in worker.ws.send.await_args_list]
+    token = next(message for message in sent if message["type"] == "token")
+    assert token["logprobs"] == logprobs
 
 
 @pytest.mark.asyncio

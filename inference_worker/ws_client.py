@@ -164,6 +164,7 @@ class StreamingWorker:
             return None
         try:
             import hashlib
+
             from eth_account.messages import encode_defunct
             result_hash = hashlib.sha256((full_text or "").encode()).hexdigest()
             signed = self._signer.sign_message(
@@ -743,6 +744,7 @@ class StreamingWorker:
                         continue
                     choice = choices[0]
                     delta = choice.get("delta") or {}
+                    logprobs = choice.get("logprobs")
                     finish = choice.get("finish_reason")
                     if finish:
                         last_finish = finish
@@ -768,12 +770,15 @@ class StreamingWorker:
                         full_reasoning += delta["reasoning_content"]
 
                     token_count += 1
-                    await self.ws.send(json.dumps({
+                    token_message = {
                         "type": "token",
                         "id": job_id,
                         "delta": delta,
                         "finish_reason": finish,
-                    }))
+                    }
+                    if logprobs is not None:
+                        token_message["logprobs"] = logprobs
+                    await self.ws.send(json.dumps(token_message))
 
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
             logger.error(f"Backend unreachable mid-generation: {e}")
