@@ -15,6 +15,9 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
     reward, and honors `cancel` frames that abort the in-flight backend request. Reasoning
     models stream `<think>…</think>` live. `GRID_BACKENDS` runs one worker per backend under a
     single supervisor; declared `input_modalities` (vision) surface on grid `/v1/models`.
+    Structured requests preserve native `logprobs`/`top_logprobs`, and token
+    frames relay backend-returned logprobs without synthesizing them. Core must
+    treat the field as untrusted and bounded validator evidence.
   - `p2p_client.py` — experimental libp2p/gossipsub transport (`P2P_ENABLED`, runs trio).
 - **Backend bridge:** `prompts.py` owns shared local-backend prompts and response
   cleanup. `detect_backends.py` owns port scans, model/context probes, and
