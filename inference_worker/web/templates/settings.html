@@ -99,6 +99,13 @@
         <div class="field-hint" x-show="enrolledWorkerName">Worker-only credentials are bound to one exact connection. Parallel operators use an advanced account key.</div>
       </label>
       <label class="field">
+        <span class="field-label">Operating Schedule <span class="optional">(optional, local time)</span></span>
+        <textarea x-model="form.GRID_SCHEDULE" rows="5"
+                  placeholder='[{"days":"mon-fri","start":"18:00","end":"23:59","concurrency":0}]'></textarea>
+        <div class="field-hint">JSON windows override concurrency while active. Use concurrency 0 for a pause window. Outside all windows, Max Threads applies.</div>
+        <div class="field-hint" x-show="enrolledWorkerName">This worker-only credential permits scheduled concurrency 0 or 1.</div>
+      </label>
+      <label class="field">
         <span class="field-label">Max Length (tokens)</span>
         <div style="display: flex; align-items: center; gap: 0.75rem;">
           <input type="range" x-model="form.GRID_MAX_LENGTH" min="64" max="32768" step="64"
@@ -168,6 +175,7 @@ function settingsForm() {
       GRID_MODEL_NAME: {{ settings.GRID_MODEL_NAME | tojson }},
       GRID_NSFW: {{ settings.GRID_NSFW | tojson }},
       GRID_MAX_THREADS: {{ settings.GRID_MAX_THREADS | tojson }},
+      GRID_SCHEDULE: {{ settings.GRID_SCHEDULE | tojson }},
       GRID_MAX_LENGTH: {{ settings.GRID_MAX_LENGTH | tojson }},
       GRID_MAX_CONTEXT_LENGTH: {{ settings.GRID_MAX_CONTEXT_LENGTH | tojson }},
     },

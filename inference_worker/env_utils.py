@@ -52,10 +52,11 @@ def reload_settings(config: dict):
         "OPENAI_API_KEY": "OPENAI_API_KEY",
         "MODEL_NAME": "MODEL_NAME",
         "GRID_MODEL_NAME": "GRID_MODEL_NAME",
+        "GRID_SCHEDULE": "GRID_SCHEDULE",
         "WALLET_ADDRESS": "WALLET_ADDRESS",
     }
     for env_key, attr in _STR.items():
-        if env_key in config and config[env_key]:
+        if env_key in config and (config[env_key] or env_key == "GRID_SCHEDULE"):
             setattr(Settings, attr, config[env_key])
 
     if "GRID_NSFW" in config:
