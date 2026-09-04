@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import re
 import urllib.parse
 
@@ -618,7 +619,13 @@ async def api_grid_stats():
     origin = Settings.GRID_API_URL.rstrip("/")
     api = origin if origin.endswith("/v1") else f"{origin}/v1"
     headers = {"apikey": Settings.GRID_API_KEY} if Settings.GRID_API_KEY else {}
-    result = {"user": None, "worker": None, "performance": None, "text_stats": None}
+    result = {
+        "user": None,
+        "worker": None,
+        "payout": None,
+        "performance": None,
+        "text_stats": None,
+    }
 
     async with httpx.AsyncClient(timeout=10) as client:
         workers_payload = {}
@@ -643,6 +650,53 @@ async def api_grid_stats():
                     "queued_text_requests": None,
                     "past_minute_tokens": 0,
                 }
+        except Exception:
+            pass
+
+        # Console-enrolled credentials intentionally carry only worker.connect.
+        # Core's self endpoint returns this exact rig's authoritative counters
+        # plus a redacted payout lifecycle, without broadening the credential to
+        # account.read or exposing sibling workers/account balances.
+        try:
+            r = await client.get(f"{api}/workers/self", headers=headers)
+            if r.status_code == 200:
+                self_status = r.json()
+                worker = self_status.get("worker") or {}
+                if self_status.get("schema") == "aipg.worker.self.v1" and worker:
+                    try:
+                        jobs_completed = max(0, int(worker.get("jobs_completed") or 0))
+                        den_earned = max(0.0, float(worker.get("den_recorded") or 0.0))
+                    except (TypeError, ValueError):
+                        jobs_completed = 0
+                        den_earned = 0.0
+                    if not math.isfinite(den_earned):
+                        den_earned = 0.0
+                    result["worker"] = {
+                        **(result["worker"] or {}),
+                        "name": worker.get("name"),
+                        "online": worker.get("online"),
+                        "maintenance": bool(worker.get("maintenance")),
+                        "last_seen": worker.get("last_seen"),
+                        "models": [
+                            item for item in (worker.get("models") or [])
+                            if isinstance(item, str)
+                        ][:32],
+                        "job_types": [
+                            item for item in (worker.get("job_types") or [])
+                            if isinstance(item, str)
+                        ][:8],
+                        "jobs_completed": jobs_completed,
+                        "den_earned": den_earned,
+                    }
+                    payout = self_status.get("payout") or {}
+                    result["payout"] = {
+                        "scope": "account",
+                        "wallet_configured": bool(payout.get("wallet_configured")),
+                        "latest_status": str(payout.get("latest_status") or ""),
+                        "last_paid_at": payout.get("last_paid_at")
+                        if isinstance(payout.get("last_paid_at"), str)
+                        else None,
+                    }
         except Exception:
             pass
 
@@ -685,6 +739,7 @@ async def api_grid_stats():
         try:
             account = await client.get(f"{api}/account", headers=headers)
             account_workers = await client.get(f"{api}/account/workers", headers=headers)
+            account_payouts = await client.get(f"{api}/account/payouts", headers=headers)
             if account.status_code == 200:
                 result["user"] = account.json()
             if account_workers.status_code == 200:
@@ -702,6 +757,23 @@ async def api_grid_stats():
                 )
                 if detail:
                     result["worker"] = {**(result["worker"] or {}), **detail}
+            if account_payouts.status_code == 200 and result["payout"] is None:
+                payout_data = account_payouts.json()
+                latest = (payout_data.get("payouts") or [None])[0]
+                result["payout"] = {
+                    "scope": "account",
+                    "wallet_configured": bool(payout_data.get("payout_wallet")),
+                    "latest_status": (
+                        latest.get("status")
+                        if isinstance(latest, dict)
+                        else (
+                            "not_started"
+                            if payout_data.get("payout_wallet")
+                            else "wallet_required"
+                        )
+                    ),
+                    "last_paid_at": latest.get("paid") if isinstance(latest, dict) else None,
+                }
         except Exception:
             pass
 

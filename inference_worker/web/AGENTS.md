@@ -58,6 +58,11 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   makes status unavailable rather than preserving a stale Online badge.
 - Session counters aggregate every active connection; no singular worker slot is
   authoritative in a multi-backend process.
+- The dashboard requests Core's `GET /v1/workers/self` with a Console-enrolled
+  worker credential. That response may identify only the bound rig and a
+  redacted account-level payout lifecycle; never broaden a worker key to
+  `account.read` or
+  expose sibling workers, payout addresses, balances, amounts, or tx hashes.
 - Dashboard den labels describe accepted work accounting. `den_per_hour` is a
   process-lifetime operational rate, not a token balance, conversion rate, or
   payout forecast. The two hourly rate cards are rounded to one decimal and

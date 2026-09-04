@@ -17,6 +17,7 @@ from inference_worker.web.routes import (
     _safe_next_url,
     _validated_backend_settings,
     _validated_schedule,
+    api_grid_stats,
 )
 
 
@@ -257,6 +258,77 @@ def test_model_test_result_is_defensive(data, reply, reasoning, finish):
 def test_runtime_dependencies_can_parse_forms_and_sign_receipts(capsys):
     _verify_runtime_dependencies()
     assert "verified" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_grid_stats_uses_redacted_bound_worker_status(monkeypatch):
+    class Response:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, *, headers=None, params=None):
+            if url.endswith("/workers/self"):
+                assert headers == {"apikey": "grid_worker_secret"}
+                return Response(
+                    200,
+                    {
+                        "schema": "aipg.worker.self.v1",
+                        "worker": {
+                            "name": "rig-a",
+                            "online": True,
+                            "maintenance": False,
+                            "last_seen": "2026-09-04T12:00:00+00:00",
+                            "models": ["model-a"],
+                            "job_types": ["text"],
+                            "jobs_completed": 7,
+                            "den_recorded": 8.25,
+                            "account_id": "private-account",
+                        },
+                        "payout": {
+                            "scope": "account",
+                            "wallet_configured": True,
+                            "latest_status": "confirmed",
+                            "last_paid_at": "2026-09-04T11:00:00+00:00",
+                            "amount": 999,
+                            "address": "private-wallet",
+                        },
+                    },
+                )
+            if url.endswith("/workers"):
+                return Response(200, {"workers": []})
+            return Response(403, {})
+
+    monkeypatch.setattr(Settings, "GRID_API_KEY", "grid_worker_secret")
+    monkeypatch.setattr(Settings, "GRID_API_URL", "https://api.aipowergrid.io")
+    monkeypatch.setattr("httpx.AsyncClient", lambda **_kwargs: Client())
+
+    result = await api_grid_stats()
+
+    assert result["worker"]["name"] == "rig-a"
+    assert result["worker"]["jobs_completed"] == 7
+    assert result["worker"]["den_earned"] == 8.25
+    assert result["payout"] == {
+        "scope": "account",
+        "wallet_configured": True,
+        "latest_status": "confirmed",
+        "last_paid_at": "2026-09-04T11:00:00+00:00",
+    }
+    rendered = str(result)
+    assert "grid_worker_secret" not in rendered
+    assert "private-account" not in rendered
+    assert "private-wallet" not in rendered
+    assert "999" not in rendered
 
 
 def test_dashboard_link_copy_is_explicit_and_local():

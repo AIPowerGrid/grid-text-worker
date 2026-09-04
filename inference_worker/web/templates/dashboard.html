@@ -134,6 +134,25 @@
     </div>
   </div>
 
+  <div class="card" x-show="grid.payout">
+    <h3>Account payout</h3>
+    <div class="config-grid">
+      <div class="config-item">
+        <span class="config-label">Destination</span>
+        <span class="config-value" x-text="grid.payout?.wallet_configured ? 'Configured' : 'Action required'"></span>
+      </div>
+      <div class="config-item">
+        <span class="config-label">Latest status</span>
+        <span class="config-value" x-text="formatPayoutStatus(grid.payout?.latest_status)"></span>
+      </div>
+      <div class="config-item">
+        <span class="config-label">Last paid</span>
+        <span class="config-value" x-text="formatDate(grid.payout?.last_paid_at)"></span>
+      </div>
+    </div>
+    <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Manage payout</a>
+  </div>
+
 
   <div class="card">
     <h3>Chat with your model</h3>
@@ -155,7 +174,7 @@ function dashboard() {
       worker_error: {{ worker_error | tojson }},
       config: null,
     },
-    grid: { user: null, worker: null, performance: null, text_stats: null },
+    grid: { user: null, worker: null, payout: null, performance: null, text_stats: null },
     sessionRates: { den_per_hour: null, jobs_per_hour: null },
     sessionRatesCaptured: false,
 
@@ -200,6 +219,26 @@ function dashboard() {
       const m = Math.floor((seconds % 3600) / 60);
       if (h > 0) return h + 'h ' + m + 'm';
       return m + 'm';
+    },
+
+    formatPayoutStatus(value) {
+      const labels = {
+        wallet_required: 'Wallet required',
+        not_started: 'No payout yet',
+        accrued: 'Accrued',
+        pending: 'Pending',
+        sent: 'Sent',
+        confirmed: 'Confirmed',
+        failed: 'Needs review',
+        manual_review: 'Needs review',
+      };
+      return labels[value] || 'Unavailable';
+    },
+
+    formatDate(value) {
+      if (!value) return '—';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
     },
 
     async poll() {
