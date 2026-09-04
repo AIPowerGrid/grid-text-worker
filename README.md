@@ -25,7 +25,7 @@ identified in the manifest and release notes so operators can make an informed
 choice. Published releases are immutable; corrections are issued as a new
 version rather than replacing a tag or binary.
 
-The current public release is `v0.3.7`. Ordinary single-model workers use the
+The current public release is `v0.3.8`. Ordinary single-model workers use the
 native Console enrollment flow. The candidate Grid key stays on the worker and
 becomes active only after a signed, short-lived Console approval. Advanced
 multi-backend or parallel operators continue to use a scoped Grid API key.
