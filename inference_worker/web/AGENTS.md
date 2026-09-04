@@ -68,9 +68,15 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   payout forecast. The two hourly rate cards are rounded to one decimal and
   snapshot the first status response for the page; refresh the page to update
   them instead of letting elapsed-time polling make them visibly drift.
-- Setup waits for confirmed registration after saving. A rejection or bounded
-  wait failure exposes Logs, never a timed success animation. Retrying setup
-  restarts the previous worker so corrected credentials actually take effect.
+- Setup waits for confirmed registration after saving. The default Console
+  enrollment then calls the local `/api/grid-canary` proxy, which keeps the
+  worker key server-side and requires Core's randomized, hard-targeted,
+  economically inert exact-output result before showing the worker as live.
+  This proves connectivity, not model identity, intelligence, or quality.
+  Advanced account keys remain registration-only because they are not bound to
+  one exact worker. A rejection or bounded wait failure exposes Logs, never a
+  timed success animation. Retrying setup restarts the previous worker so
+  corrected credentials actually take effect.
 - API-key and payout-wallet setup link to the console. Do not request wallet
   connections locally or claim the legacy wallet field controls rewards.
 - Setup and Settings expose the single-backend concurrency limit and validated

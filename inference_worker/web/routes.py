@@ -612,6 +612,86 @@ async def restart_worker():
     return {"ok": True}
 
 
+@app.post("/api/grid-canary")
+async def api_grid_canary():
+    """Run Core's exact-worker connectivity canary without exposing the key."""
+    import httpx
+
+    if not Settings.GRID_API_KEY:
+        return JSONResponse(
+            {"ok": False, "error": "Worker credential is not configured."},
+            status_code=409,
+        )
+
+    origin = Settings.GRID_API_URL.rstrip("/")
+    api = origin if origin.endswith("/v1") else f"{origin}/v1"
+    try:
+        async with httpx.AsyncClient(timeout=190) as client:
+            response = await client.post(
+                f"{api}/workers/self/canary",
+                headers={"apikey": Settings.GRID_API_KEY},
+            )
+    except Exception as exc:
+        logger.warning(
+            "Grid connectivity canary request failed (%s)",
+            type(exc).__name__,
+        )
+        return JSONResponse(
+            {"ok": False, "error": "Grid connectivity canary is unavailable."},
+            status_code=503,
+        )
+
+    error_by_status = {
+        401: "Worker credential was rejected by the Grid.",
+        403: "This credential cannot run an exact-worker canary.",
+        404: "Grid connectivity canary is not available on Core yet.",
+        409: "The worker is not ready for a Grid connectivity canary.",
+        429: "A connectivity canary ran recently. Try again in a few minutes.",
+    }
+    if response.status_code != 200:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": error_by_status.get(
+                    response.status_code,
+                    "Grid connectivity canary failed.",
+                ),
+            },
+            status_code=response.status_code
+            if response.status_code in error_by_status
+            else 502,
+        )
+
+    try:
+        result = response.json()
+    except Exception:
+        result = None
+    if (
+        not isinstance(result, dict)
+        or result.get("schema") != "aipg.worker.canary.v1"
+        or result.get("status") not in {"passed", "failed"}
+        or result.get("economic_effect") != "none"
+    ):
+        return JSONResponse(
+            {"ok": False, "error": "Grid returned an invalid canary result."},
+            status_code=502,
+        )
+
+    return {
+        "ok": result["status"] == "passed",
+        "status": result["status"],
+        "worker_name": str(result.get("worker_name") or "")[:120],
+        "model": str(result.get("model") or "")[:256],
+        "latency_ms": result.get("latency_ms")
+        if isinstance(result.get("latency_ms"), int)
+        else None,
+        "reason": str(result.get("reason") or "")[:64],
+        "proof_scope": "hard_targeted_connectivity_and_exact_output",
+        "quality_claim": "none",
+        "economic_effect": "none",
+    }
+
+
 @app.get("/api/grid-stats")
 async def api_grid_stats():
     """Fetch worker + grid stats from the AIPG API."""

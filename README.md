@@ -61,11 +61,15 @@ Advanced multi-backend or parallel operators use an existing scoped key from
 the [developer Console](https://console.aipowergrid.io/dashboard/api-key)
 because each enrolled credential is bound to one exact worker name.
 
-The wizard confirms a Grid registration before reporting success. A running
+The normal Console-enrolled flow confirms registration and then asks Core to
+route a randomized, hard-targeted connectivity canary through that exact
+worker before reporting success. The canary has no charge, den, payout, strike,
+or validator effect; it proves the route and exact response, not model identity
+or general quality. Advanced account-key setups receive registration-only
+confirmation because those keys are not bound to one exact worker. A running
 process alone is not an online worker. The dashboard distinguishes connecting,
 partially connected, online, and unavailable status. If setup cannot confirm a
-connection, open Logs and check the backend, API key, and worker name; saving
-configuration does not prove a job has completed.
+connection, open Logs and check the backend, API key, and worker name.
 
 Payouts use the account that owns the API key. Native enrollment uses the
 account that approved the worker credential. Manage the payout wallet in
