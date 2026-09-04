@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 import urllib.parse
 
 from fastapi import Request
@@ -23,6 +25,25 @@ from .app import app, templates, worker_state, log_buffer, start_worker, stop_wo
 logger = logging.getLogger(__name__)
 
 _AUTH_EXEMPT = ("/static", "/login", "/favicon.ico")
+_PERSISTED_BACKEND_SETTINGS = frozenset(
+    {
+        "BACKEND_TYPE",
+        "GRID_API_KEY",
+        "GRID_MAX_CONTEXT_LENGTH",
+        "GRID_MAX_LENGTH",
+        "GRID_MAX_THREADS",
+        "GRID_MODEL_NAME",
+        "GRID_NSFW",
+        "GRID_SCHEDULE",
+        "GRID_WORKER_NAME",
+        "MODEL_NAME",
+        "OLLAMA_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_URL",
+    }
+)
+_SCHEDULE_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
 def _model_test_result(data: object) -> tuple[str, bool, str | None]:
@@ -89,11 +110,78 @@ def _set_auth_cookie(response, request: Request) -> None:
 def _validated_backend_settings(value: object) -> dict:
     if not isinstance(value, dict):
         raise ValueError("Settings payload must be an object")
-    form = dict(value)
+    if set(value) - _PERSISTED_BACKEND_SETTINGS:
+        raise ValueError("Settings payload contains unsupported fields")
+    form = {}
+    for key, raw in value.items():
+        text = str(raw) if raw is not None else ""
+        limit = 8192 if key == "GRID_SCHEDULE" else 4096
+        if len(text) > limit or "\n" in text or "\r" in text:
+            raise ValueError(f"Invalid value for {key}")
+        form[key] = text
     for key in ("OLLAMA_URL", "OPENAI_URL"):
         if key in form and form[key]:
             form[key] = validated_backend_url(form[key])
+    if "GRID_SCHEDULE" in form:
+        form["GRID_SCHEDULE"] = _validated_schedule(form["GRID_SCHEDULE"])
+    if "BACKEND_TYPE" in form and form["BACKEND_TYPE"] not in {"ollama", "openai"}:
+        raise ValueError("Unsupported backend type")
+    if "GRID_NSFW" in form and form["GRID_NSFW"].lower() not in {"true", "false"}:
+        raise ValueError("GRID_NSFW must be true or false")
+    for key, lower, upper in (
+        ("GRID_MAX_THREADS", 1, 16),
+        ("GRID_MAX_LENGTH", 64, 32768),
+        ("GRID_MAX_CONTEXT_LENGTH", 256, 131072),
+    ):
+        if key not in form or not form[key]:
+            continue
+        try:
+            number = int(form[key])
+        except ValueError as exc:
+            raise ValueError(f"{key} must be an integer") from exc
+        if not lower <= number <= upper:
+            raise ValueError(f"{key} is outside the supported range")
+        form[key] = str(number)
     return form
+
+
+def _validated_schedule(value: object) -> str:
+    """Validate and canonicalize the local-time capacity schedule."""
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or len(value) > 8192:
+        raise ValueError("Schedule must be JSON text")
+    try:
+        windows = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Schedule must be valid JSON") from exc
+    if not isinstance(windows, list) or len(windows) > 32:
+        raise ValueError("Schedule must be a list of at most 32 windows")
+
+    for window in windows:
+        if not isinstance(window, dict):
+            raise ValueError("Each schedule window must be an object")
+        if set(window) - {"days", "start", "end", "concurrency"}:
+            raise ValueError("Schedule window contains an unknown field")
+        days = str(window.get("days") or "daily").strip().lower()
+        if days not in {"*", "all", "daily"}:
+            for part in days.split(","):
+                bounds = [item.strip() for item in part.split("-")]
+                if len(bounds) not in {1, 2} or any(
+                    item not in _SCHEDULE_DAYS for item in bounds
+                ):
+                    raise ValueError("Schedule days must use mon-sun names")
+        for field in ("start", "end"):
+            if field in window and not _TIME_RE.fullmatch(str(window[field])):
+                raise ValueError(f"Schedule {field} must use 24-hour HH:MM")
+        concurrency = window.get("concurrency")
+        if (
+            isinstance(concurrency, bool)
+            or not isinstance(concurrency, int)
+            or not 0 <= concurrency <= 16
+        ):
+            raise ValueError("Schedule concurrency must be an integer from 0 to 16")
+    return json.dumps(windows, separators=(",", ":"))
 
 
 def _enrolled_settings_error(form: dict) -> str | None:
@@ -109,6 +197,11 @@ def _enrolled_settings_error(form: dict) -> str | None:
         return "Max Threads must be an integer"
     if max_threads != 1:
         return "Console-enrolled credentials support one connection; use an advanced account key for parallel slots"
+    schedule = form.get("GRID_SCHEDULE", Settings.GRID_SCHEDULE)
+    if schedule and any(
+        window.get("concurrency", 1) > 1 for window in json.loads(schedule)
+    ):
+        return "Console-enrolled credentials support one connection; scheduled concurrency cannot exceed one"
     return None
 
 
@@ -440,6 +533,7 @@ async def api_status():
             "model_name": Settings.MODEL_NAME,
             "grid_model_name": Settings.GRID_MODEL_NAME,
             "max_threads": Settings.MAX_THREADS,
+            "schedule": Settings.GRID_SCHEDULE,
             "max_length": Settings.MAX_LENGTH,
             "max_context_length": Settings.MAX_CONTEXT_LENGTH,
             "nsfw": Settings.NSFW,
@@ -479,6 +573,7 @@ async def settings_page(request: Request):
             "GRID_MODEL_NAME": Settings.GRID_MODEL_NAME,
             "GRID_NSFW": str(Settings.NSFW).lower(),
             "GRID_MAX_THREADS": str(Settings.MAX_THREADS),
+            "GRID_SCHEDULE": Settings.GRID_SCHEDULE,
             "GRID_MAX_LENGTH": str(Settings.MAX_LENGTH),
             "GRID_MAX_CONTEXT_LENGTH": str(Settings.MAX_CONTEXT_LENGTH),
         },

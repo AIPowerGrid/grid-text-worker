@@ -43,6 +43,14 @@ test('backend credentials remain editable and labels are backend-neutral', () =>
   assert.ok(!setup.includes('OpenAI Endpoint'));
 });
 
+test('setup and settings expose actual capacity controls', () => {
+  assert.ok(setup.includes('Max Simultaneous Jobs'));
+  assert.ok(setup.includes('x-model="config.schedule"'));
+  assert.ok(setup.includes('payload.GRID_SCHEDULE'));
+  assert.ok(settings.includes('Operating Schedule'));
+  assert.ok(settings.includes('GRID_SCHEDULE: {{ settings.GRID_SCHEDULE'));
+});
+
 test('dashboard presents den as work accounting, not money', () => {
   assert.ok(dashboard.includes('>Den/hr</span>'));
   assert.ok(dashboard.includes('operational rate, not a token amount or payout forecast'));

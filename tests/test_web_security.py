@@ -16,6 +16,7 @@ from inference_worker.web.routes import (
     _model_test_result,
     _safe_next_url,
     _validated_backend_settings,
+    _validated_schedule,
 )
 
 
@@ -50,6 +51,45 @@ def test_backend_settings_reject_metadata_target():
         _validated_backend_settings({"OPENAI_URL": "http://169.254.169.254/v1"})
 
 
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"PYTHONPATH": "/tmp/attacker"},
+        {"GRID_WORKER_NAME": "worker\nPYTHONPATH=/tmp/attacker"},
+        {"BACKEND_TYPE": "shell"},
+        {"GRID_NSFW": "maybe"},
+        {"GRID_MAX_THREADS": "17"},
+        {"GRID_MAX_LENGTH": "not-a-number"},
+        {"GRID_MAX_CONTEXT_LENGTH": "131073"},
+    ],
+)
+def test_backend_settings_reject_unsupported_or_malformed_values(settings):
+    with pytest.raises(ValueError):
+        _validated_backend_settings(settings)
+
+
+def test_schedule_is_validated_and_canonicalized():
+    assert _validated_schedule(
+        '[ { "days": "mon-fri", "start": "18:00", "end": "23:59", "concurrency": 0 } ]'
+    ) == '[{"days":"mon-fri","start":"18:00","end":"23:59","concurrency":0}]'
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        '{}',
+        '[{"days":"funday","concurrency":0}]',
+        '[{"start":"25:00","concurrency":0}]',
+        '[{"concurrency":17}]',
+        '[{"concurrency":true}]',
+        '[{"concurrency":0,"command":"shutdown"}]',
+    ],
+)
+def test_schedule_rejects_invalid_windows(value):
+    with pytest.raises(ValueError):
+        _validated_schedule(value)
+
+
 def test_enrolled_settings_reject_rename_and_parallel_slots(monkeypatch):
     monkeypatch.setattr(
         Settings, "GRID_ENROLLED_WORKER_NAME", "Text-Inference-Worker-test"
@@ -65,6 +105,13 @@ def test_enrolled_settings_reject_rename_and_parallel_slots(monkeypatch):
     assert _enrolled_settings_error(
         {"GRID_WORKER_NAME": "Text-Inference-Worker-test", "GRID_MAX_THREADS": "1"}
     ) is None
+    assert _enrolled_settings_error(
+        {
+            "GRID_WORKER_NAME": "Text-Inference-Worker-test",
+            "GRID_MAX_THREADS": "1",
+            "GRID_SCHEDULE": '[{"concurrency":2}]',
+        }
+    ).startswith("Console-enrolled credentials support one connection")
 
 
 @pytest.fixture

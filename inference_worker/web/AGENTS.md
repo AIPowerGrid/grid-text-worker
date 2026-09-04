@@ -49,6 +49,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 - **Don't run blocking detection in request handlers** — `/setup` renders instantly and the
   page calls `POST /api/setup/detect`; wrap blocking probes in `asyncio.to_thread`.
 - Persist config only via `env_utils.write_env` + `reload_settings`; `Settings` is the single source.
+- Setup and Settings accept only their explicit backend-field allowlist. Keep
+  values bounded and canonicalized before writing `.env`; the local manager is
+  not a general environment-variable editor.
 - `/api/status` separates process lifetime (`worker_running`) from confirmed
   registration (`grid_connected`, `connected_workers`, `total_workers`). Online
   requires every active connection to have a Grid `ready` handshake. Poll failure
@@ -65,6 +68,10 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   restarts the previous worker so corrected credentials actually take effect.
 - API-key and payout-wallet setup link to the console. Do not request wallet
   connections locally or claim the legacy wallet field controls rewards.
+- Setup and Settings expose the single-backend concurrency limit and validated
+  local-time schedule. Schedule JSON is bounded and canonicalized before
+  persistence; Console-enrolled credentials may schedule only zero or one
+  connection. Empty Settings input clears the active schedule.
 - `/api/setup/enrollment/start` and `/api/setup/enrollment/poll` drive the
   default Console device flow. They may return public approval state only;
   candidate keys, poll tokens, delegation files, and dashboard tokens must
