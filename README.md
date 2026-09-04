@@ -30,6 +30,10 @@ native Console enrollment flow. The candidate Grid key stays on the worker and
 becomes active only after a signed, short-lived Console approval. Advanced
 multi-backend or parallel operators continue to use a scoped Grid API key.
 
+Source on `main` may contain a newer draft candidate. Use the version exposed
+by the verified `/run` release gate unless you are performing supervised
+candidate qualification.
+
 | Platform | File |
 |----------|------|
 | Windows x64 | `grid-inference-worker-windows-x64.exe` |
