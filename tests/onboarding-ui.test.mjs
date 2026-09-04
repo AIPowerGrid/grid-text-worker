@@ -55,6 +55,8 @@ test('dashboard presents den as work accounting, not money', () => {
   assert.ok(dashboard.includes('>Den/hr</span>'));
   assert.ok(dashboard.includes('operational rate, not a token amount or payout forecast'));
   assert.ok(dashboard.includes('>Den recorded</span>'));
+  assert.ok(dashboard.includes('<h3>Account payout</h3>'));
+  assert.ok(dashboard.includes("wallet_required: 'Wallet required'"));
   assert.ok(!dashboard.includes('Points/hr'));
   assert.match(dashboard, /formatRate\(sessionRates\.den_per_hour\)/);
   assert.match(dashboard, /formatRate\(sessionRates\.jobs_per_hour\)/);
