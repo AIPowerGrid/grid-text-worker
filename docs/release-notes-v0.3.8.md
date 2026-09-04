@@ -30,10 +30,14 @@ Before tagging, the source candidate passed:
    an independently running GPU host. The detector enumerated both available
    models and an OpenAI-compatible generation completed with `finish_reason=stop`.
 
-The exact frozen Linux candidate must repeat backend detection, model
-enumeration, runtime verification, and generation before this draft is
-published. A running process or a successful local model response alone does
-not prove Grid registration.
+Before publication, the exact frozen Linux asset repeated its runtime
+self-check, rendered the new capacity controls, detected and enumerated the
+live Ollama backend, and completed a visible model response. It ran from an
+isolated configuration directory beside the existing services and left no
+process, credential, or test directory behind. A running process or a
+successful local model response alone does not prove Grid registration; the
+unchanged enrollment path retains the production evidence recorded for
+v0.3.7.
 
 ## Platform Trust
 
