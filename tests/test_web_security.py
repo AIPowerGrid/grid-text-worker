@@ -17,6 +17,7 @@ from inference_worker.web.routes import (
     _safe_next_url,
     _validated_backend_settings,
     _validated_schedule,
+    api_grid_canary,
     api_grid_stats,
 )
 
@@ -329,6 +330,97 @@ async def test_grid_stats_uses_redacted_bound_worker_status(monkeypatch):
     assert "private-account" not in rendered
     assert "private-wallet" not in rendered
     assert "999" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_grid_canary_keeps_worker_key_server_side_and_redacts_core_payload(monkeypatch):
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "schema": "aipg.worker.canary.v1",
+                "status": "passed",
+                "worker_name": "rig-a",
+                "model": "model-a",
+                "latency_ms": 125,
+                "reason": "exact_output",
+                "proof_scope": "hard_targeted_connectivity_and_exact_output",
+                "quality_claim": "none",
+                "economic_effect": "none",
+                "prompt": "private challenge",
+                "output": "private output",
+                "account_id": "private account",
+            }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers):
+            assert url == "https://api.aipowergrid.io/v1/workers/self/canary"
+            assert headers == {"apikey": "grid_worker_secret"}
+            return Response()
+
+    monkeypatch.setattr(Settings, "GRID_API_KEY", "grid_worker_secret")
+    monkeypatch.setattr(Settings, "GRID_API_URL", "https://api.aipowergrid.io")
+    monkeypatch.setattr("httpx.AsyncClient", lambda **_kwargs: Client())
+
+    result = await api_grid_canary()
+
+    assert result == {
+        "ok": True,
+        "status": "passed",
+        "worker_name": "rig-a",
+        "model": "model-a",
+        "latency_ms": 125,
+        "reason": "exact_output",
+        "proof_scope": "hard_targeted_connectivity_and_exact_output",
+        "quality_claim": "none",
+        "economic_effect": "none",
+    }
+    rendered = str(result)
+    assert "grid_worker_secret" not in rendered
+    assert "private challenge" not in rendered
+    assert "private output" not in rendered
+    assert "private account" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_grid_canary_rejects_missing_key_and_invalid_core_result(monkeypatch):
+    monkeypatch.setattr(Settings, "GRID_API_KEY", "")
+    missing = await api_grid_canary()
+    assert missing.status_code == 409
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "schema": "aipg.worker.canary.v1",
+                "status": "passed",
+                "economic_effect": "paid",
+            }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(Settings, "GRID_API_KEY", "grid_worker_secret")
+    monkeypatch.setattr(Settings, "GRID_API_URL", "https://api.aipowergrid.io")
+    monkeypatch.setattr("httpx.AsyncClient", lambda **_kwargs: Client())
+    invalid = await api_grid_canary()
+    assert invalid.status_code == 502
+    assert b"invalid canary result" in invalid.body
 
 
 def test_dashboard_link_copy_is_explicit_and_local():

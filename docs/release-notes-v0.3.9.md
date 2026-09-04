@@ -1,8 +1,8 @@
 # Text Worker v0.3.9
 
-This candidate adds an authoritative worker-status view to the local manager.
-It does not change Grid job execution, charging, den accounting, payout
-settlement, enrollment, or transport behavior from v0.3.8.
+This candidate adds an authoritative worker-status view and a Core-routed
+connectivity canary to the local manager. Ordinary customer job execution,
+charging, den accounting, and payout settlement are unchanged from v0.3.8.
 
 ## Operator Changes
 
@@ -16,15 +16,24 @@ settlement, enrollment, or transport behavior from v0.3.8.
   periods, or transaction hashes.
 - Managers connected to an older Core release degrade gracefully instead of
   treating a missing endpoint as a worker failure.
+- After secure Console enrollment registers the exact worker, setup asks Core
+  to route one randomized exact-output request through that worker. Setup shows
+  the worker as live only when the result is bound to the requested worker and
+  Core reports no economic effect.
+- The canary creates no customer charge, worker den, payout, strike, validator
+  evidence, or quality score. It proves Grid connectivity and exact output,
+  not model identity, intelligence, or general quality.
+- Advanced account-key setups remain registration-confirmed because those
+  credentials are not bound to one exact worker.
 
 ## Candidate Gates
 
 Publication remains blocked until:
 
-1. The matching Core endpoint is deployed and its worker-credential boundary
-   passes a supervised production check.
-2. The exact frozen Linux candidate displays authoritative status while its
-   worker is connected to the Grid.
+1. The matching Core status and canary endpoints are deployed and their
+   worker-credential boundaries pass a supervised production check.
+2. The exact frozen Linux candidate displays authoritative status and passes
+   the hard-targeted connectivity canary while its worker is connected.
 3. The complete release envelope, platform builds, runtime self-checks,
    browser tests, secret scans, SBOM, checksums, and provenance attestations
    pass for the immutable tag.

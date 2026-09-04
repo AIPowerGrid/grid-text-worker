@@ -447,11 +447,11 @@
           </div>
           <div class="deploy-step" :class="deploy.phase >= 2 ? 'done' : (deploy.phase === 1 ? 'active' : '')">
             <span class="deploy-dot"></span>
-            <span>Connecting to AI Power Grid...</span>
+            <span>Waiting for Grid registration...</span>
           </div>
           <div class="deploy-step" :class="deploy.phase >= 3 ? 'done' : (deploy.phase === 2 ? 'active' : '')">
             <span class="deploy-dot"></span>
-            <span>Deploying <strong x-text="config.model_name"></strong>...</span>
+            <span x-text="credential_mode === 'console' ? 'Running Grid connectivity canary...' : 'Advanced key: registration check only'"></span>
           </div>
           <div class="deploy-step" :class="deploy.phase >= 4 ? 'done' : ''">
             <span class="deploy-dot"></span>
@@ -463,6 +463,8 @@
           <p class="deploy-live">Ready to receive Grid jobs</p>
           <p style="color: var(--text-dim); font-size: 0.82rem; margin-top: 0.35rem;"
              x-text="(config.grid_model_name || ('grid/' + config.model_name)) + ' on AI Power Grid'"></p>
+          <p style="color: var(--text-dim); font-size: 0.78rem; margin-top: 0.35rem;"
+             x-text="deploy.verification"></p>
           <button class="btn btn-primary" style="margin-top: 1.25rem;" @click="window.location.href = '/'">
             Open Dashboard
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
@@ -516,7 +518,7 @@ function setupWizard() {
     first_contact: { prompt: '', reply: '', error: '', loading: false, slow: false },
     credential_mode: 'console',
     enrollment: { status: 'idle', busy: false, error: '', authorize_url: '', worker_name: '' },
-    deploy: { started: false, phase: 0, done: false, error: '' },
+    deploy: { started: false, phase: 0, done: false, error: '', verification: '' },
 
     async init() {
       await this.runDetect();
@@ -589,7 +591,7 @@ function setupWizard() {
     },
 
     async deployWorker() {
-      this.deploy = { started: true, phase: 0, done: false, error: '' };
+      this.deploy = { started: true, phase: 0, done: false, error: '', verification: '' };
 
       const wait = ms => new Promise(r => setTimeout(r, ms));
 
@@ -640,6 +642,23 @@ function setupWizard() {
             return;
           }
           if (status.grid_connected) {
+            this.deploy.phase = 2;
+            if (this.credential_mode === 'console') {
+              const canaryResponse = await fetch('/api/grid-canary', {
+                method: 'POST',
+                signal: AbortSignal.timeout(195000),
+              });
+              const canary = await canaryResponse.json();
+              if (!canaryResponse.ok || !canary.ok || canary.status !== 'passed' ||
+                  canary.economic_effect !== 'none') {
+                this.deploy.error = canary.error || 'Grid connectivity canary failed. Open Logs and try again.';
+                return;
+              }
+              this.deploy.verification = 'Exact worker route verified. No credits, den, or rewards were created by this test.';
+            } else {
+              this.deploy.verification = 'Grid registration confirmed. Exact-worker canary requires secure Console enrollment.';
+            }
+            this.deploy.phase = 3;
             this.deploy.phase = 4;
             this.deploy.done = true;
             return;

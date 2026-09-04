@@ -154,13 +154,52 @@ test('saving configuration and a running process do not imply Grid acceptance', 
 
 test('only an accepted connection completes the wizard', async () => {
   let polls = 0;
+  const calls = [];
   const wizard = instantiate(setup, 'setupWizard', async url => {
+    calls.push(url);
     if (url === '/api/setup/complete') return response({ ok: true });
-    return response({ worker_running: true, grid_connected: ++polls === 3 });
+    if (url === '/api/status') {
+      return response({ worker_running: true, grid_connected: ++polls === 3 });
+    }
+    if (url === '/api/grid-canary') {
+      return response({ ok: true, status: 'passed', economic_effect: 'none' });
+    }
+    throw new Error(`unexpected URL ${url}`);
   });
   await wizard.deployWorker();
   assert.equal(wizard.deploy.done, true);
   assert.equal(polls, 3);
+  assert.equal(calls.at(-1), '/api/grid-canary');
+  assert.match(wizard.deploy.verification, /Exact worker route verified/);
+});
+
+test('a connected worker with a failed canary does not complete setup', async () => {
+  const wizard = instantiate(setup, 'setupWizard', async url => {
+    if (url === '/api/setup/complete') return response({ ok: true });
+    if (url === '/api/status') return response({ grid_connected: true });
+    if (url === '/api/grid-canary') {
+      return { ok: false, json: async () => ({ ok: false, error: 'Canary mismatch' }) };
+    }
+    throw new Error(`unexpected URL ${url}`);
+  });
+  await wizard.deployWorker();
+  assert.equal(wizard.deploy.done, false);
+  assert.equal(wizard.deploy.error, 'Canary mismatch');
+});
+
+test('advanced account keys stay registration-only', async () => {
+  const calls = [];
+  const wizard = instantiate(setup, 'setupWizard', async url => {
+    calls.push(url);
+    if (url === '/api/setup/complete') return response({ ok: true });
+    if (url === '/api/status') return response({ grid_connected: true });
+    throw new Error(`unexpected URL ${url}`);
+  });
+  wizard.credential_mode = 'manual';
+  await wizard.deployWorker();
+  assert.equal(wizard.deploy.done, true);
+  assert.ok(!calls.includes('/api/grid-canary'));
+  assert.match(wizard.deploy.verification, /registration confirmed/i);
 });
 
 test('a rejected key is not a successful setup', async () => {
@@ -190,6 +229,7 @@ test('blank worker name is not replaced with a shared hardcoded identity', async
     }
     return response({ grid_connected: true });
   });
+  wizard.credential_mode = 'manual';
   await wizard.deployWorker();
   assert.equal(payload.GRID_WORKER_NAME, '');
 });

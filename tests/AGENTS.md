@@ -11,7 +11,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   platform helpers, and backend URL policy.
 - `test_web_security.py` - management-plane redirect and backend-persistence
   boundaries, real login form parsing/cookies, model-test response handling,
-  dashboard-link clipboard behavior, and frozen-runtime dependency checks.
+  Core canary proxy redaction, dashboard-link clipboard behavior, and
+  frozen-runtime dependency checks.
 - `test_release_assets.py` - offline release payload, checksum, and archive
   safety verification, including exact installer/release identity.
 - `test_linux_installer.py` - mocked-host Linux install, checksum-tamper
@@ -25,7 +26,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
 - `test_bundled_ca.py` - public CA inclusion checks for onefile and onedir
   layouts; requires the build extra. The release CI also checks actual binaries.
 - `onboarding-ui.test.mjs` - Node built-in tests of the actual template scripts:
-  bounded setup polling, rejection, unavailable status, and account links.
+  bounded setup polling, rejection, unavailable status, required Console
+  connectivity canary, advanced registration-only mode, and account links.
   It also keeps dashboard den labels on the work-accounting boundary and out of
   retired reward or earnings-rate language.
 
