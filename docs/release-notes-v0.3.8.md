@@ -46,3 +46,34 @@ v0.3.7.
 - Windows is unsigned and macOS is not notarized. Their manifest state and
   installation warnings remain explicit; signing is recommended but not a
   publication blocker.
+
+## Subsequent Owned Bridge Rollout
+
+On September 5, an owned multi-backend production bridge was upgraded from an
+older source checkout with local vision/cancellation changes to the v0.3.8
+source tag `afbb37595b61fa92a3b5bbd4dbba7320d31e008d`. Review confirmed that the
+local changes were already included in this release. The deployment uses a
+separate source directory and virtual environment installed from the tag's
+hash-locked dependencies, not the frozen executable. It preserves the prior
+checkout for rollback and the existing headless `run_worker.py` launch mode.
+
+The existing configuration, signer and original service unit were unchanged
+under before/after digest checks; an additive executable override selects the
+release while preserving the working directory. The chat frontend, API,
+database and model servers were not restarted. All three configured workers
+registered with Core, a subsequent DeepSeek completion was recorded, and the
+public chat login remained available with HTTP 200.
+
+On that VM, 95 tests passed with one skip. A separate real-GPT-OSS request
+through the released handler emitted 29 native-logprob token frames and one
+completion without error to an in-memory Grid-side receiver. This proves
+native backend-to-bridge relay, not a live end-to-end validator assignment or
+general model fidelity. The 32-token response exhausted its reasoning budget
+without visible content.
+
+The validator's
+[real calibration report](https://github.com/AIPowerGrid/grid-validator/blob/docs/validator-real-fidelity-measurements/TEXT_FIDELITY_EXPERIMENT_2026_09_05.md)
+records same-backend repeats, different-backend comparisons and successful
+logprob-copying/probe-aware-routing evasions. Fidelity issuance and economic
+authority remain off; worker logprob support does not make self-reported
+probabilities trustworthy.
