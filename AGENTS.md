@@ -65,6 +65,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   create draft-only tagged releases.
 - `docs/` — vLLM setup/optimization guides and candidate release notes
   (Markdown, not AGENTS.md).
+  `docs/release-notes-v0.3.8.md` also records the subsequent owned headless
+  source-bridge rollout and real native-logprob relay proof, distinct from
+  frozen-binary qualification or end-to-end validator fidelity authority.
 - `tests/` — pytest smoke tests.
 
 ## Local Contracts
