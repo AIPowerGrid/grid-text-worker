@@ -9,6 +9,12 @@
      @worker-status.window="applyStatus($event.detail)">
 
   <!-- Live session stats (from worker memory) -->
+  <div class="stats-head" x-show="status.session_stats">
+    <span class="stats-head-label">Session rates</span>
+    <button type="button" class="btn-icon" @click="refreshRates()" title="Refresh Den/hr and Jobs/hr now">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+    </button>
+  </div>
   <div class="stats-row" x-show="status.session_stats">
     <div class="stat-card accent">
       <div class="stat-label"><span class="hint" title="Den is the Grid work-accounting unit recorded for accepted jobs. Den per hour is an operational rate, not a token amount or payout forecast.">Den/hr</span></div>
@@ -40,16 +46,76 @@
     </div>
     <div class="stat-card">
       <div class="stat-label">Grid Status</div>
-      <div class="stat-value" x-text="grid.worker?.online ? 'Online' : 'Offline'"></div>
+      <div class="stat-value" x-text="gridStatusLabel()"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Models</div>
-      <div class="stat-value" x-text="grid.worker?.models?.length ?? '—'"></div>
+      <div class="stat-value" x-text="(status.backends?.length) || (grid.worker?.models?.length ?? '—')"></div>
     </div>
   </div>
 
+  <!-- Models roster -->
+  <div class="card models-card" x-show="status.backends?.length || roster.available.length">
+    <div class="models-head">
+      <h3>Models</h3>
+      <span class="field-hint" x-show="roster.notice" x-text="roster.notice"></span>
+    </div>
+    <div class="models-scroll">
+    <table class="models-table">
+      <thead>
+        <tr><th></th><th>Model</th><th>Grid name</th><th>Jobs</th><th>Den</th><th style="text-align: right;">Actions</th></tr>
+      </thead>
+      <tbody>
+        <template x-for="b in status.backends || []" :key="b.name">
+          <tr>
+            <td><span class="status-dot" :class="backendDotClass(b)" :title="backendStateLabel(b)"></span></td>
+            <td><span x-text="b.model"></span></td>
+            <td class="mono" x-text="b.grid_model"></td>
+            <td x-text="b.jobs_completed"></td>
+            <td x-text="formatNum(b.den_earned)"></td>
+            <td style="text-align: right;">
+              <button type="button" class="btn btn-sm btn-outline" @click="togglePause(b)" :disabled="roster.busy === b.name">
+                <span x-show="roster.busy !== b.name" x-text="b.paused ? 'Resume' : 'Pause'"></span>
+                <span x-show="roster.busy === b.name" class="spinner-sm"></span>
+              </button>
+            </td>
+          </tr>
+        </template>
+        <template x-for="pmodel in roster.pending" :key="pmodel">
+          <tr>
+            <td><span class="spinner-sm"></span></td>
+            <td><span x-text="pmodel"></span></td>
+            <td class="mono" style="color: var(--text-dim);">joining the grid…</td>
+            <td>&mdash;</td>
+            <td>&mdash;</td>
+            <td style="text-align: right;"><button type="button" class="btn btn-sm btn-outline" disabled>Connecting</button></td>
+          </tr>
+        </template>
+        <template x-for="a in roster.available" :key="a.model">
+          <tr class="models-offline">
+            <td><span class="status-dot paused" title="Installed locally, not serving the grid"></span></td>
+            <td><span x-text="a.model"></span></td>
+            <td class="mono" style="color: var(--text-dim);">not on grid</td>
+            <td>&mdash;</td>
+            <td>&mdash;</td>
+            <td style="text-align: right;">
+              <button type="button" class="btn btn-sm btn-outline" @click="connectModel(a)" :disabled="roster.busy === a.model">
+                <span x-show="roster.busy !== a.model">Connect</span>
+                <span x-show="roster.busy === a.model" class="spinner-sm"></span>
+              </button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    </div>
+    <p class="field-hint" x-show="(status.backends || []).some(b => b.paused)">
+      A paused model hangs up its grid connections within 30 seconds and stops receiving jobs; Resume reconnects it.
+    </p>
+  </div>
+
   <!-- Config / Network / Account -->
-  <div class="dash-columns">
+  <div class="dash-grid">
     <div class="card">
       <h3>Worker Config</h3>
       <div class="config-grid">
@@ -58,31 +124,27 @@
           <span class="config-value" x-text="status.config?.worker_name || '—'"></span>
         </div>
         <div class="config-item">
-          <span class="config-label">Backend</span>
-          <span class="config-value" x-text="(status.config?.backend_type || '—')"></span>
+          <span class="config-label">Engine</span>
+          <span class="config-value" x-text="engineLabel()"></span>
         </div>
         <div class="config-item">
-          <span class="config-label">Model</span>
-          <span class="config-value" x-text="status.config?.model_name || '—'"></span>
+          <span class="config-label">Endpoint</span>
+          <span class="config-value" x-text="endpointLabel()"></span>
         </div>
+
         <div class="config-item">
-          <span class="config-label">Context</span>
-          <span class="config-value" x-text="(status.config?.max_context_length || '—') + ' tokens'"></span>
-        </div>
-        <div class="config-item">
-          <span class="config-label">Max Length</span>
+          <span class="config-label">Max response</span>
           <span class="config-value" x-text="(status.config?.max_length || '—') + ' tokens'"></span>
         </div>
         <div class="config-item">
-          <span class="config-label">Threads</span>
+          <span class="config-label">Jobs per model</span>
           <span class="config-value" x-text="status.config?.max_threads || '—'"></span>
         </div>
         <div class="config-item">
-          <span class="config-label">Wallet</span>
-          <span class="config-value">
-            <a href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Managed in Grid account</a>
-          </span>
+          <span class="config-label">Schedule</span>
+          <span class="config-value" x-text="scheduleLabel()"></span>
         </div>
+
       </div>
     </div>
 
@@ -92,10 +154,6 @@
         <div class="config-item">
           <span class="config-label">Text Workers</span>
           <span class="config-value" x-text="grid.performance?.text_worker_count ?? '—'"></span>
-        </div>
-        <div class="config-item">
-          <span class="config-label">Queued Requests</span>
-          <span class="config-value" x-text="grid.performance?.queued_text_requests ?? '—'"></span>
         </div>
         <div class="config-item">
           <span class="config-label">Tokens/min</span>
@@ -115,7 +173,6 @@
         </div>
       </div>
     </div>
-    <div class="dash-col-stack">
   <div class="card" x-show="grid.user">
     <h3>Your Account</h3>
     <div class="config-grid">
@@ -134,34 +191,18 @@
     </div>
   </div>
 
-  <div class="card" x-show="grid.payout">
-    <h3>Account payout</h3>
-    <div class="config-grid">
-      <div class="config-item">
-        <span class="config-label">Destination</span>
-        <span class="config-value" x-text="grid.payout?.wallet_configured ? 'Configured' : 'Action required'"></span>
-      </div>
-      <div class="config-item">
-        <span class="config-label">Latest status</span>
-        <span class="config-value" x-text="formatPayoutStatus(grid.payout?.latest_status)"></span>
-      </div>
-      <div class="config-item">
-        <span class="config-label">Last paid</span>
-        <span class="config-value" x-text="formatDate(grid.payout?.last_paid_at)"></span>
-      </div>
+  <a class="card chat-card" href="https://aipg.chat" target="_blank" rel="noopener">
+    <img src="/static/logo.png" alt="" class="chat-card-logo">
+    <div class="chat-card-text">
+      <span class="chat-card-title">Chat with your model</span>
+      <span class="chat-card-sub">Pick your model in the selector and talk to your own worker on the Grid.</span>
     </div>
-    <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Manage payout</a>
-  </div>
+    <span class="chat-card-link">
+      aipg.chat
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+    </span>
+  </a>
 
-
-  <div class="card">
-    <h3>Chat with your model</h3>
-    <p style="color: var(--text-dim); font-size: 0.85rem; margin: 0;">
-      Visit <a href="https://aipg.chat" target="_blank" rel="noopener" style="color: var(--accent);">aipg.chat</a> and select your model in the upper selector to chat with your worker on the Grid.
-    </p>
-  </div>
-
-    </div>
   </div>
 
 </div>
@@ -174,25 +215,162 @@ function dashboard() {
       worker_error: {{ worker_error | tojson }},
       config: null,
     },
-    grid: { user: null, worker: null, payout: null, performance: null, text_stats: null },
+    grid: { user: null, worker: null, performance: null, text_stats: null },
     sessionRates: { den_per_hour: null, jobs_per_hour: null },
     sessionRatesCaptured: false,
+    roster: { available: [], pending: [], busy: '', notice: '' },
+
+    // Rates are den/uptime, so the first minutes extrapolate wildly from a tiny
+    // window. Capture once past warm-up, then hold steady; the refresh button
+    // and a 30-minute timer re-capture so a left-open page can't go stale.
+    RATE_WARMUP_SECONDS: 120,
 
     applyStatus(nextStatus) {
       this.status = nextStatus;
-      if (!this.sessionRatesCaptured && nextStatus.session_stats) {
-        this.sessionRates = {
-          den_per_hour: nextStatus.session_stats.den_per_hour,
-          jobs_per_hour: nextStatus.session_stats.jobs_per_hour,
-        };
-        this.sessionRatesCaptured = true;
+      if (this.roster.pending.length) {
+        const live = new Set((nextStatus.backends || []).map(b => b.model));
+        this.roster.pending = this.roster.pending.filter(m => !live.has(m));
+      }
+      const stats = nextStatus.session_stats;
+      if (!this.sessionRatesCaptured && stats &&
+          (stats.uptime_seconds || 0) >= this.RATE_WARMUP_SECONDS) {
+        this.captureRates(stats);
+      }
+    },
+
+    captureRates(stats) {
+      this.sessionRates = {
+        den_per_hour: stats.den_per_hour,
+        jobs_per_hour: stats.jobs_per_hour,
+      };
+      this.sessionRatesCaptured = true;
+    },
+
+    refreshRates() {
+      const stats = this.status.session_stats;
+      if (stats && (stats.uptime_seconds || 0) >= this.RATE_WARMUP_SECONDS) {
+        this.captureRates(stats);
       }
     },
 
     formatRate(n) {
+      if (n == null) return '—';  // warm-up: no captured rate yet
       const value = Number(n);
       if (!Number.isFinite(value)) return '—';
       return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    },
+
+    backendDotClass(b) {
+      if (b.paused) return 'paused';
+      if (b.connection_error) return 'error';
+      if (b.connected >= b.expected && b.expected > 0) return 'online';
+      return 'error';
+    },
+
+    backendStateLabel(b) {
+      if (b.paused) return 'Paused';
+      if (b.connection_error) return b.connection_error;
+      if (b.connected >= b.expected && b.expected > 0) return 'Online';
+      return 'Connecting';
+    },
+
+    async loadRoster() {
+      try {
+        const r = await fetch('/api/backends');
+        const d = await r.json();
+        const pending = new Set(this.roster.pending);
+        this.roster.available = (d.available || []).filter(m => !pending.has(m.model));
+      } catch (e) {}
+    },
+
+    async togglePause(b) {
+      this.roster.busy = b.name;
+      this.roster.notice = '';
+      try {
+        const r = await fetch('/api/backends/pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: b.name, paused: !b.paused }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.roster.notice = b.paused ? 'Resuming — reconnects within 30s' : 'Pausing — hangs up within 30s';
+        } else {
+          this.roster.notice = d.error || 'Could not update the model';
+        }
+      } catch (e) {
+        this.roster.notice = 'Could not reach the worker';
+      } finally {
+        this.roster.busy = '';
+      }
+    },
+
+    async connectModel(a) {
+      this.roster.busy = a.model;
+      this.roster.notice = '';
+      // Optimistic move into "pending": the row keeps its place with a status
+      // instead of vanishing while the roster restarts and repolls.
+      this.roster.pending.push(a.model);
+      this.roster.available = this.roster.available.filter(m => m.model !== a.model);
+      try {
+        const r = await fetch('/api/backends/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // Joining an existing roster: default a shareable context slice.
+          body: JSON.stringify({ model: a.model, url: a.url, type: 'ollama',
+                                 max_context: (this.status.backends || []).length ? 8192 : undefined }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.roster.notice = 'All models reconnect briefly while the new one joins.';
+        } else {
+          this.roster.pending = this.roster.pending.filter(m => m !== a.model);
+          this.roster.notice = d.error || 'Could not add the model';
+          await this.loadRoster();
+        }
+      } catch (e) {
+        this.roster.pending = this.roster.pending.filter(m => m !== a.model);
+        this.roster.notice = 'Could not reach the worker';
+        await this.loadRoster();
+      } finally {
+        this.roster.busy = '';
+      }
+    },
+
+    // Per-model facts live in the Models table; this card carries only the
+    // rig-wide settings that hold for one model or N.
+    engineLabel() {
+      const types = [...new Set((this.status.backends || []).map(b => b.backend_type))];
+      return types.length ? types.join(', ') : (this.status.config?.backend_type || '—');
+    },
+
+    endpointLabel() {
+      const urls = [...new Set((this.status.backends || []).map(b => b.url))];
+      if (!urls.length) return this.status.config?.ollama_url || '—';
+      return urls.length === 1 ? urls[0] : urls[0] + ' +' + (urls.length - 1);
+    },
+
+    scheduleLabel() {
+      const raw = (this.status.config?.schedule || '').trim();
+      if (!raw) return 'Always on';
+      try {
+        const w = JSON.parse(raw)[0];
+        if (!w) return 'Always on';
+        const jobs = Number(w.concurrency) === 0 ? 'paused' : w.concurrency + ' job' + (Number(w.concurrency) === 1 ? '' : 's');
+        return `${w.days || 'daily'} · ${w.start || '00:00'}–${w.end || '23:59'} · ${jobs}`;
+      } catch (e) { return 'Custom'; }
+    },
+
+    // Local registration state is the truth; the public workers list only
+    // knows one of our connection names at a time.
+    gridStatusLabel() {
+      const backends = this.status.backends || [];
+      if (backends.length) {
+        const live = backends.filter(b => b.connected > 0).length;
+        if (live === 0) return 'Offline';
+        return live === backends.length ? 'Online' : live + ' of ' + backends.length;
+      }
+      return this.grid.worker?.online ? 'Online' : 'Offline';
     },
 
     formatNum(n) {
@@ -202,14 +380,6 @@ function dashboard() {
       return String(n);
     },
 
-    formatPerf(s) {
-      if (!s) return '—';
-      const m = s.match(/([\d.]+)\s*tokens?\s*per\s*second/i);
-      if (m) return Math.round(parseFloat(m[1])) + ' t/s';
-      const m2 = s.match(/([\d.]+)\s*megapixelsteps?\s*per\s*second/i);
-      if (m2) return parseFloat(m2[1]).toFixed(1) + ' mp/s';
-      return s;
-    },
 
     formatUptime(seconds) {
       if (!seconds) return '—';
@@ -221,19 +391,6 @@ function dashboard() {
       return m + 'm';
     },
 
-    formatPayoutStatus(value) {
-      const labels = {
-        wallet_required: 'Wallet required',
-        not_started: 'No payout yet',
-        accrued: 'Accrued',
-        pending: 'Pending',
-        sent: 'Sent',
-        confirmed: 'Confirmed',
-        failed: 'Needs review',
-        manual_review: 'Needs review',
-      };
-      return labels[value] || 'Unavailable';
-    },
 
     formatDate(value) {
       if (!value) return '—';
@@ -250,6 +407,9 @@ function dashboard() {
       };
       await updateGrid();
       setInterval(updateGrid, 30000);
+      await this.loadRoster();
+      setInterval(() => this.loadRoster(), 60000);
+      setInterval(() => { this.sessionRatesCaptured = false; }, 30 * 60 * 1000);
     }
   }
 }
