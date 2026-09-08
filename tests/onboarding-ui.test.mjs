@@ -33,8 +33,14 @@ test('setup links to the console and does not promise local wallet payouts', () 
     assert.ok(!source.includes('api.aipowergrid.io/register'));
     assert.ok(!source.includes('Dev Fund'));
     assert.ok(!source.includes('eth_requestAccounts'));
+  }
+  // Payout management lives in setup and settings; the dashboard stays about
+  // operating, not wallets.
+  for (const file of ['setup.html', 'settings.html']) {
+    const source = readFileSync(new URL(file, templates), 'utf8');
     assert.ok(source.includes('https://console.aipowergrid.io/dashboard/settings'));
   }
+  assert.ok(!dashboard.includes('https://console.aipowergrid.io/dashboard/settings'));
 });
 
 test('backend credentials remain editable and labels are backend-neutral', () => {
@@ -44,19 +50,52 @@ test('backend credentials remain editable and labels are backend-neutral', () =>
 });
 
 test('setup and settings expose actual capacity controls', () => {
-  assert.ok(setup.includes('Max Simultaneous Jobs'));
-  assert.ok(setup.includes('x-model="config.schedule"'));
+  assert.ok(setup.includes('Simultaneous jobs'));
+  // The schedule is built from day/time/concurrency controls, not raw JSON.
+  assert.ok(setup.includes('class="sched-days"'));
+  assert.ok(setup.includes('toggleDay(day)'));
+  assert.ok(setup.includes('scheduleJson()'));
   assert.ok(setup.includes('payload.GRID_SCHEDULE'));
-  assert.ok(settings.includes('Operating Schedule'));
+  // Settings edits the same schedule through the same builder as setup.
+  assert.ok(settings.includes('Operating schedule'));
+  assert.ok(settings.includes('class="sched-days"'));
+  assert.ok(settings.includes('toggleDay(day)'));
+  assert.ok(settings.includes('scheduleJson()'));
   assert.ok(settings.includes('GRID_SCHEDULE: {{ settings.GRID_SCHEDULE'));
+});
+
+test('settings hydrates the schedule builder from the stored window', () => {
+  // A stored day range must come back as selected days, not a blank builder.
+  assert.match(settings, /hydrateSchedule\(\)/);
+  assert.match(settings, /JSON\.parse\(raw\)/);
+  assert.ok(settings.includes("GRID_SCHEDULE: this.scheduleJson()"));
+});
+
+test('settings names controls the way setup does', () => {
+  assert.ok(settings.includes('Simultaneous jobs'));
+  assert.ok(settings.includes('Jobs in window'));
+  assert.ok(settings.includes('Backend endpoint'));
+  assert.ok(!settings.includes('Max Threads'));
+  assert.ok(!settings.includes('Ollama URL'));
+});
+
+test('schedule defaults to always-on and emits nothing in that state', () => {
+  // 24x7 at full capacity is what "no schedule" already means to the grid.
+  assert.match(setup, /days: \['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'\]/);
+  assert.match(setup, /start: '00:00'/);
+  assert.match(setup, /end: '23:59'/);
+  assert.match(setup, /scheduleIsDefault\(\)\) return '';/);
+});
+
+test('grid model names default to the bare model name', () => {
+  assert.ok(!setup.includes("'grid/' +"));
+  assert.ok(setup.includes('grid_model: m,'));
 });
 
 test('dashboard presents den as work accounting, not money', () => {
   assert.ok(dashboard.includes('>Den/hr</span>'));
   assert.ok(dashboard.includes('operational rate, not a token amount or payout forecast'));
   assert.ok(dashboard.includes('>Den recorded</span>'));
-  assert.ok(dashboard.includes('<h3>Account payout</h3>'));
-  assert.ok(dashboard.includes("wallet_required: 'Wallet required'"));
   assert.ok(!dashboard.includes('Points/hr'));
   assert.match(dashboard, /formatRate\(sessionRates\.den_per_hour\)/);
   assert.match(dashboard, /formatRate\(sessionRates\.jobs_per_hour\)/);
@@ -148,8 +187,8 @@ test('saving configuration and a running process do not imply Grid acceptance', 
   });
   await wizard.deployWorker();
   assert.equal(wizard.deploy.done, false);
-  assert.match(wizard.deploy.error, /not confirmed/);
-  assert.equal(polls, 90);
+  assert.match(wizard.deploy.error, /no model reached the Grid/);
+  assert.equal(polls, 150);
 });
 
 test('only an accepted connection completes the wizard', async () => {
@@ -170,7 +209,6 @@ test('only an accepted connection completes the wizard', async () => {
   assert.equal(wizard.deploy.done, true);
   assert.equal(polls, 3);
   assert.equal(calls.at(-1), '/api/grid-canary');
-  assert.match(wizard.deploy.verification, /Exact worker route verified/);
 });
 
 test('a connected worker with a failed canary does not complete setup', async () => {
@@ -199,7 +237,142 @@ test('advanced account keys stay registration-only', async () => {
   await wizard.deployWorker();
   assert.equal(wizard.deploy.done, true);
   assert.ok(!calls.includes('/api/grid-canary'));
-  assert.match(wizard.deploy.verification, /registration confirmed/i);
+});
+
+test('a transient per-model error does not fail a deploy that still connects', async () => {
+  // Several cold models mean one backend can be retrying while another lands;
+  // only what is connected when the window closes decides the outcome.
+  let polls = 0;
+  const wizard = instantiate(setup, 'setupWizard', async url => {
+    if (url === '/api/setup/complete') return response({ ok: true });
+    if (url === '/api/status') {
+      polls++;
+      return response({
+        worker_running: true,
+        grid_connected: polls >= 4,
+        connection_error: polls < 4 ? 'Grid connection lost; reconnecting.' : null,
+        backends: [
+          { name: 'a', grid_model: 'a', connected: 1, expected: 1, connection_error: null },
+          { name: 'b', grid_model: 'b', connected: polls >= 4 ? 1 : 0, expected: 1,
+            connection_error: polls < 4 ? 'Grid connection lost; reconnecting.' : null },
+        ],
+      });
+    }
+    if (url === '/api/grid-canary') return response({ ok: true, status: 'passed', economic_effect: 'none' });
+    throw new Error(`unexpected URL ${url}`);
+  });
+  await wizard.deployWorker();
+  assert.equal(wizard.deploy.done, true);
+  assert.equal(wizard.deploy.error, '');
+});
+
+test('a partial connection completes as partial, not as failure', async () => {
+  const wizard = instantiate(setup, 'setupWizard', async url => {
+    if (url === '/api/setup/complete') return response({ ok: true });
+    return response({
+      worker_running: true,
+      grid_connected: false,
+      backends: [
+        { name: 'a', grid_model: 'a', connected: 1, expected: 1, connection_error: null },
+        { name: 'b', grid_model: 'b', connected: 0, expected: 1, connection_error: 'still trying' },
+      ],
+    });
+  });
+  wizard.credential_mode = 'manual';
+  await wizard.deployWorker();
+  assert.equal(wizard.deploy.done, true);
+  assert.equal(wizard.deploy.partial, true);
+  assert.equal(wizard.deploy.error, '');
+  assert.equal(wizard.deployConnectedCount(), 1);
+});
+
+test('selected Console roster keeps the enrolled name and clears old schedules', async () => {
+  let payload;
+  const wizard = instantiate(setup, 'setupWizard', async (url, options) => {
+    if (url === '/api/setup/complete') {
+      payload = JSON.parse(options.body);
+      return response({ok: false, error: 'capture only'});
+    }
+    throw new Error(url);
+  });
+  wizard.config.worker_name = 'test-rig';
+  wizard.enrollment.worker_name = 'test-rig';
+  wizard.model_entries = [{model: 'qwen', selected: true, max_context: 8192}];
+  await wizard.deployWorker();
+  assert.equal(JSON.parse(payload.GRID_BACKENDS)[0].name, 'test-rig');
+  assert.equal(payload.GRID_SCHEDULE, '');
+});
+
+test('Console setup rejects multiple models before saving or enrolling', async () => {
+  const wizard = instantiate(setup, 'setupWizard', async () => { throw new Error('must not fetch'); });
+  wizard.model_entries = [{model: 'a', selected: true}, {model: 'b', selected: true}];
+  await wizard.deployWorker();
+  assert.match(wizard.deploy.error, /one model/);
+  await wizard.connectGridAccount();
+  assert.match(wizard.enrollment.error, /one model/);
+});
+
+test('Console partial registration never bypasses its required canary', async () => {
+  const wizard = instantiate(setup, 'setupWizard', async url => response(
+    url === '/api/setup/complete' ? {ok: true} : {grid_connected: false, backends: [{connected: 1}]}
+  ));
+  await wizard.deployWorker();
+  assert.equal(wizard.deploy.done, false);
+});
+
+function settingsInstance(fetch = async () => response({ok: true})) {
+  // Render non-secret template values just as the server does; execute the
+  // actual settings controller, not a duplicate implementation.
+  return instantiate(settings.replace(/{{[\s\S]*?}}/g, '""'), 'settingsForm', fetch);
+}
+
+test('empty day selection produces an explicit all-week pause in both editors', () => {
+  const wizard = instantiate(setup, 'setupWizard', async () => response({}));
+  const editor = settingsInstance();
+  for (const page of [wizard, editor]) {
+    page.sched.days = [];
+    page.scheduleDirty = true;
+    assert.deepEqual(JSON.parse(page.scheduleJson()), [{concurrency: 0}]);
+  }
+});
+
+test('settings preserves multiple windows and wrapping days without an edit', () => {
+  const editor = settingsInstance();
+  editor.form.GRID_MAX_THREADS = '1';
+  const raw = '[{"days":"fri-mon","concurrency":0},{"days":"tue","concurrency":0}]';
+  editor.form.GRID_SCHEDULE = raw;
+  editor.hydrateSchedule();
+  assert.equal(editor.scheduleJson(), raw);
+  assert.equal(editor.scheduleAdvanced, true);
+  assert.deepEqual(Array.from(editor.sched.days), ['mon', 'fri', 'sat', 'sun']);
+});
+
+test('settings serializes the edited per-backend values and preserves overrides', async () => {
+  let payload;
+  const editor = settingsInstance(async (_url, options) => {
+    payload = JSON.parse(options.body);
+    return response({ok: true});
+  });
+  editor.backendsLoaded = true;
+  editor.backends = [{name: 'rig-a', backend_type: 'openai', url: 'http://127.0.0.1:9000/v1',
+    model: 'qwen', grid_model: 'qwen', concurrency: 3, api_key: 'replacement-fixture',
+    schedule: '[{"concurrency":0}]', modalities: ['text'], max_context: 8192}];
+  await editor.save();
+  const entry = JSON.parse(payload.GRID_BACKENDS)[0];
+  assert.equal(entry.url, 'http://127.0.0.1:9000/v1');
+  assert.equal(entry.concurrency, 3);
+  assert.equal(entry.api_key, 'replacement-fixture');
+  assert.equal(entry.schedule, '[{"concurrency":0}]');
+  assert.deepEqual(entry.modalities, ['text']);
+  assert.equal(editor.saved, true);
+});
+
+test('settings cannot overwrite configuration after a roster fetch failure', async () => {
+  const editor = settingsInstance(async () => ({ok: false}));
+  await editor.loadBackends();
+  assert.equal(editor.backendsLoaded, false);
+  await editor.save();
+  assert.equal(editor.saved, false);
 });
 
 test('a rejected key is not a successful setup', async () => {
@@ -251,4 +424,26 @@ test('unreachable dashboard invalidates a previously online status', async () =>
   await shell.poll();
   assert.equal(shell.statusLabel(), 'Status unavailable');
   assert.notEqual(shell.statusClass(), 'online');
+});
+
+test('console credentials clamp both concurrency controls to one', () => {
+  // Core rejects >1 for an enrolled credential, in the baseline and inside a
+  // schedule window alike — the wizard must not be able to build that config.
+  const wizard = instantiate(setup, 'setupWizard', async () => response({}));
+  wizard.credential_mode = 'console';
+  wizard.config.max_threads = '4';
+  wizard.sched.concurrency = 6;
+  wizard.clampConcurrencyForCredential();
+  assert.equal(wizard.config.max_threads, '1');
+  assert.equal(wizard.sched.concurrency, 1);
+});
+
+test('an api-key credential leaves concurrency to the operator', () => {
+  const wizard = instantiate(setup, 'setupWizard', async () => response({}));
+  wizard.credential_mode = 'manual';
+  wizard.config.max_threads = '4';
+  wizard.sched.concurrency = 6;
+  wizard.clampConcurrencyForCredential();
+  assert.equal(wizard.config.max_threads, '4');
+  assert.equal(wizard.sched.concurrency, 6);
 });

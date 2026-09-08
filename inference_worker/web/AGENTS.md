@@ -41,7 +41,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   persistence. Cloud metadata, link-local, multicast, reserved, credentialed,
   query-bearing, and malformed targets are forbidden.
 - Management APIs return stable error classes rather than raw exceptions or
-  backend bodies. Automatic remote-script installation is not part of this UI;
+  backend bodies. Settings validation exposes only explicitly authored public
+  messages; wrapped URL/library exceptions never become response text.
+  Automatic remote-script installation is not part of this UI;
   operators install Ollama through its reviewed platform installer.
 - Browser runtime dependencies are versioned local assets included in the frozen
   binary. Do not replace them with floating CDN URLs; update the vendored file,
@@ -66,8 +68,8 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 - Dashboard den labels describe accepted work accounting. `den_per_hour` is a
   process-lifetime operational rate, not a token balance, conversion rate, or
   payout forecast. The two hourly rate cards are rounded to one decimal and
-  snapshot the first status response for the page; refresh the page to update
-  them instead of letting elapsed-time polling make them visibly drift.
+  snapshot after two minutes of uptime; manual refresh or a 30-minute interval
+  updates them without elapsed-time polling making them visibly drift.
 - Setup waits for confirmed registration after saving. The default Console
   enrollment then calls the local `/api/grid-canary` proxy, which keeps the
   worker key server-side and requires Core's randomized, hard-targeted,
@@ -108,3 +110,35 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 ## Child DOX Index
 
 - None — leaf.
+
+## Multi-model roster (GRID_BACKENDS in the web layer)
+- The wizard's model step is a multi-select roster; every selection ships in
+  `GRID_BACKENDS` via `/api/setup/complete` (validated by
+  `_validated_backends_json`). One selection uses the same path — never the
+  scalar-vs-array split.
+- `/api/status` carries a `backends` array (per-backend connection state and
+  session counters from `_backend_rows`). The dashboard Models table renders
+  it plus `/api/backends`' `available` list (Ollama tags, models not serving).
+- Roster mutations: `/api/backends/add` and `/api/backends/remove` rewrite
+  GRID_BACKENDS and restart the worker task (the supervisor builds its roster
+  at start). `/api/backends/pause` flips the live spec through
+  `ws_client.LIVE_BACKENDS` (takes effect within SUPERVISOR_INTERVAL) and
+  persists `paused` in the entry so restarts keep it.
+- All roster persistence validates unique names, bounds, supported fields,
+  backend URLs, and exact-name enrollment constraints. Console enrollment
+  permits one named backend and at most one connection; Add requires an advanced
+  account key. Partial registration cannot bypass the Console connectivity canary.
+- Settings edits endpoint, type, credentials, and concurrency per backend.
+  Stored credentials never reach the browser and are retained only for the same
+  type/URL/model when the replacement is blank. Changed endpoints do not inherit
+  credentials. A failed roster load disables saving.
+- Preserve multi-window/wrapping schedules and per-backend schedule/modality
+  overrides on unrelated saves. Custom schedules remain editable as JSON;
+  selecting no days serializes an explicit all-week pause, never an empty
+  (always-on) schedule. Omitted per-backend schedules inherit the rig schedule.
+- `reload_settings` pushes GRID_BACKENDS into `os.environ` because
+  `load_backends()` reads the process environment — without that, an in-app
+  restart serves the roster snapshotted at process start.
+- Session-rate tiles capture den/hr + jobs/hr only after 120s uptime (early
+  samples extrapolate wildly), then hold; the refresh button and a 30-minute
+  timer re-capture.

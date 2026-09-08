@@ -39,8 +39,11 @@
 
     <div class="step-columns">
       <div class="step-col">
-        <!-- Auto-detection results -->
+        <!-- Auto-detection results (fixed geometry; state changes, size doesn't) -->
         <div class="detect-box" :class="detecting ? 'loading' : (backends.length > 0 ? 'success' : 'idle')">
+          <button type="button" class="detect-rescan" @click="runDetect()" :disabled="detecting" title="Re-scan for engines">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
           <template x-if="detecting">
             <div class="detect-status">
               <div class="spinner"></div>
@@ -48,11 +51,21 @@
             </div>
           </template>
 
-          <template x-if="!detecting && backends.length > 0">
+          <template x-if="!detecting && backends.length === 1">
+            <div class="detect-status">
+              <div class="status-icon success">&#10003;</div>
+              <div class="detect-flat">
+                <strong x-text="backends[0].name"></strong>
+                <span class="tag" x-text="backends[0].models.length + ' model' + (backends[0].models.length !== 1 ? 's' : '') + ' detected'"></span>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="!detecting && backends.length > 1">
             <div>
               <div class="detect-status">
                 <div class="status-icon success">&#10003;</div>
-                <strong x-text="backends.length === 1 ? '1 backend detected' : backends.length + ' backends detected'"></strong>
+                <strong x-text="backends.length + ' backends detected — pick one'"></strong>
               </div>
               <div style="margin-top: 0.65rem; display: flex; flex-direction: column; gap: 0.4rem;">
                 <template x-for="(b, i) in backends" :key="i">
@@ -63,9 +76,7 @@
                       <strong x-text="b.name"></strong>
                       <span style="color: var(--text-dim); margin-left: 0.35rem; font-size: 0.8rem;" x-text="b.url"></span>
                     </span>
-                    <span style="display: flex; gap: 0.3rem; align-items: center;">
-                      <span class="tag" x-text="b.models.length + ' model' + (b.models.length !== 1 ? 's' : '')"></span>
-                    </span>
+                    <span class="tag" x-text="b.models.length + ' model' + (b.models.length !== 1 ? 's' : '')"></span>
                   </button>
                 </template>
               </div>
@@ -85,12 +96,8 @@
           </template>
         </div>
 
-        <div style="margin-bottom: 1rem; text-align: center;">
-          <button type="button" class="btn btn-sm btn-outline" @click="runDetect()" :disabled="detecting">Re-scan</button>
-        </div>
-
-        <!-- Backend URL + Model -->
-        <div x-show="backends.length > 0 || url_check.reachable">
+        <!-- Backend URL + models -->
+        <div class="step-flow" x-show="backends.length > 0 || url_check.reachable">
           <label class="field">
             <span class="field-label">Backend endpoint</span>
             <div class="input-with-action">
@@ -100,38 +107,50 @@
                 <span x-show="checking_url" class="spinner-sm"></span>
               </button>
             </div>
-            <div class="field-hint" x-show="url_check.reachable === true" style="color: var(--green);">
-              Connected — <span x-text="url_check.name || 'Unknown engine'"></span>
-              <span x-show="url_check.version"> v<span x-text="url_check.version"></span></span>
+            <div class="field-hint-slot">
+              <span x-show="url_check.reachable === true" style="color: var(--green);">
+                Connected — <span x-text="url_check.name || 'Unknown engine'"></span><span x-show="url_check.version"> v<span x-text="url_check.version"></span></span>
+              </span>
+              <span x-show="url_check.reachable === false && !url_check.auth_required && url_check.checked" style="color: var(--red);">Not reachable</span>
+              <span x-show="url_check.auth_required" style="color: var(--red);">Authentication required — enter your API key below</span>
             </div>
-            <div class="field-hint" x-show="url_check.reachable === false && !url_check.auth_required && url_check.checked" style="color: var(--red);">Not reachable</div>
-            <div class="field-hint" x-show="url_check.auth_required" style="color: var(--red);">Authentication required — enter your API key below</div>
           </label>
 
           <label class="field">
             <span class="field-label">API Key <span class="optional">(optional)</span></span>
-            <input type="password" x-model="config.backend_api_key" placeholder="sk-..."
+            <input type="password" autocomplete="off" data-1p-ignore x-model="config.backend_api_key" placeholder="sk-..."
                    :style="url_check.auth_required ? 'border-color: var(--red)' : ''">
           </label>
 
-          <label class="field">
+          <div class="field" x-show="model_entries.length > 0">
+            <span class="field-label">Models</span>
+            <div class="model-roster">
+              <template x-for="entry in model_entries" :key="entry.model">
+                <div class="model-card" :class="entry.selected ? 'selected' : ''">
+                  <label class="model-card-head">
+                    <input type="checkbox" x-model="entry.selected" @change="onModelToggled(entry)">
+                    <span class="model-card-name" x-text="entry.model"></span>
+                    <span class="model-card-grid" x-text="entry.grid_model"></span>
+                  </label>
+                  <div class="model-card-ctx" x-show="entry.selected" x-transition.opacity>
+                    <span class="model-card-ctx-label">Context</span>
+                    <input type="range" class="model-card-slider"
+                           :min="2048" :max="entry.context || 131072" step="1024"
+                           x-model.number="entry.max_context" @input="entry.ctx_touched = true">
+                    <span class="model-card-ctx-value"
+                          x-text="Number(entry.max_context || 0).toLocaleString() + ' ctx'"></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+          <label class="field" x-show="model_entries.length === 0">
             <span class="field-label">Model</span>
-            <template x-if="available_models.length > 0">
-              <select x-model="config.model_name" @change="updateGridModelName(); fetchContextLength()">
-                <option value="" disabled selected
-                        x-text="available_models.length + ' model' + (available_models.length !== 1 ? 's' : '') + ' detected — select one'"></option>
-                <template x-for="m in available_models" :key="m">
-                  <option :value="m" x-text="m"></option>
-                </template>
-              </select>
-            </template>
-            <template x-if="available_models.length === 0">
-              <input type="text" x-model="config.model_name" @change="updateGridModelName(); fetchContextLength()" placeholder="e.g. llama3.2:3b">
-            </template>
+            <input type="text" x-model="config.model_name" @change="updateGridModelName(); fetchContextLength()" placeholder="e.g. llama3.2:3b">
           </label>
 
           <!-- Ollama pull model -->
-          <div x-show="config.engine === 'ollama' && config.model_name && !available_models.includes(config.model_name)" style="margin-bottom: 1rem;">
+          <div x-show="config.engine === 'ollama' && config.model_name && model_entries.length === 0 && !available_models.includes(config.model_name)" style="margin-bottom: 1rem;">
             <button type="button" class="btn btn-outline btn-sm" @click="pullModel()" :disabled="pulling_model">
               <span x-show="!pulling_model">Pull Model from Ollama</span>
               <span x-show="pulling_model"><span class="spinner-sm"></span> Pulling...</span>
@@ -140,32 +159,31 @@
             <div class="field-hint" x-show="pull_ok" style="color: var(--green); margin-top: 0.3rem;">Model pulled!</div>
           </div>
 
-          <!-- Context Length -->
-          <label class="field" x-show="config.model_name">
+          <!-- Context Length (manual path only): roster models carry their own
+               detected window per row; the worker re-detects per connection. -->
+          <label class="field" x-show="model_entries.length === 0">
             <span class="field-label">Context Length</span>
             <div style="display: flex; align-items: center; gap: 0.75rem;">
               <input type="range" x-model="config.max_context_length" min="256"
                      :max="detected_context_length || 131072" step="256"
+                     :disabled="!config.model_name"
                      style="flex: 1; accent-color: var(--accent);">
               <span style="min-width: 4.5rem; text-align: right; font-size: 0.85rem; font-family: monospace; color: var(--text);"
-                    x-text="Number(config.max_context_length).toLocaleString()"></span>
-              <span x-show="detecting_context" class="spinner-sm"></span>
+                    x-text="config.model_name ? Number(config.max_context_length).toLocaleString() : '—'"></span>
             </div>
-            <div x-show="detected_context_length" x-transition
-                 style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
-              <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;"></span>
-              <span style="font-size: 0.78rem; color: var(--green);">
+            <div class="field-hint-slot">
+              <span x-show="!config.model_name">Select a model to detect its context window</span>
+              <span x-show="config.model_name && detecting_context"><span class="spinner-sm"></span> Detecting from backend…</span>
+              <span x-show="config.model_name && detected_context_length" style="color: var(--green);">
                 Detected <span x-text="Number(detected_context_length).toLocaleString()"></span> from backend
               </span>
-            </div>
-            <div class="field-hint" x-show="context_fetch_done && !detected_context_length">
-              Could not auto-detect &mdash; enter manually
+              <span x-show="config.model_name && context_fetch_done && !detected_context_length">Could not auto-detect — set manually</span>
             </div>
           </label>
         </div>
 
         <!-- No backend detected: manual add / remote API / install Ollama -->
-        <div x-show="backends.length === 0 && !url_check.reachable">
+        <div class="step-flow" x-show="backends.length === 0 && !url_check.reachable && detect_done">
           <div class="install-card">
             <p class="install-step-label">Connect to OpenAI-Compatible Endpoint</p>
             <p class="field-hint" style="margin-bottom: 0.65rem;">Any local or remote endpoint that speaks the OpenAI API — Ollama, vLLM, LM Studio, OpenAI, Together, Groq, etc.</p>
@@ -178,16 +196,14 @@
                   <span x-show="checking_url" class="spinner-sm"></span>
                 </button>
               </div>
-              <div class="field-hint" x-show="url_check.reachable === true" style="color: var(--green);">
-                Connected — <span x-text="url_check.name || 'Unknown engine'"></span>
-                <span x-show="url_check.version"> v<span x-text="url_check.version"></span></span>
+              <div class="field-hint-slot">
+                <span x-show="url_check.reachable === false && !url_check.auth_required && url_check.checked" style="color: var(--red);">Not reachable</span>
+                <span x-show="url_check.auth_required" style="color: var(--red);">Authentication required — enter your API key below</span>
               </div>
-              <div class="field-hint" x-show="url_check.reachable === false && !url_check.auth_required && url_check.checked" style="color: var(--red);">Not reachable</div>
-              <div class="field-hint" x-show="url_check.auth_required" style="color: var(--red);">Authentication required — enter your API key below</div>
             </label>
             <label class="field" style="margin-bottom: 0;">
               <span class="field-label">API Key <span class="optional">(optional — for remote APIs)</span></span>
-              <input type="password" x-model="config.backend_api_key" placeholder="sk-... or key from your provider"
+              <input type="password" autocomplete="off" data-1p-ignore x-model="config.backend_api_key" placeholder="sk-... or key from your provider"
                      :style="url_check.auth_required ? 'border-color: var(--red)' : ''">
             </label>
           </div>
@@ -203,38 +219,49 @@
             <a href="https://ollama.com/download" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Download Ollama</a>
             <p class="field-hint" style="margin-top: 0.4rem;">Or run: <code>curl -fsSL https://ollama.com/install.sh | sh</code></p>
             {% endif %}
-            <p class="field-hint" style="margin-top: 0.4rem;">After installing, run <code>ollama serve</code> then click <strong>Re-scan</strong> above.</p>
+            <p class="field-hint" style="margin-top: 0.4rem;">After installing, run <code>ollama serve</code> then click the re-scan arrow above.</p>
           </div>
         </div>
       </div>
 
-      <!-- Right column: Enlistment -->
-      <div class="step-col step-col-side" x-show="first_contact.prompt || first_contact.loading">
-        <div class="first-contact" x-transition>
-          <div class="fc-label">Enlistment</div>
-          <div class="fc-chat">
-            <div class="fc-bubble" :class="first_contact.reply ? 'fc-model' : 'fc-user'">
-              <div class="fc-role" x-text="first_contact.reply ? (config.model_name || 'Recruit') : 'Grid Command'"></div>
-              <template x-if="first_contact.loading">
-                <div>
-                  <div class="fc-text" x-text="first_contact.prompt"></div>
-                  <div class="fc-typing" style="margin-top: 0.5rem;">
-                    <span></span><span></span><span></span>
-                  </div>
-                  <div class="fc-loading-hint" x-show="first_contact.slow" x-transition>
-                    Recruit is loading up, stand by&hellip;
-                  </div>
-                </div>
-              </template>
-              <template x-if="!first_contact.loading && first_contact.reply">
-                <div class="fc-text" x-text="first_contact.reply"></div>
-              </template>
-              <template x-if="!first_contact.loading && !first_contact.reply && !first_contact.error">
-                <div class="fc-text" x-text="first_contact.prompt"></div>
+      <!-- Right column: Enlistment (always present — no layout shift when it fills) -->
+      <div class="step-col step-col-side">
+        <div class="first-contact">
+          <div class="fc-label">
+            <span>Enlistment</span>
+            <span class="fc-count" x-show="selectedEntries().length > 0"
+                  x-text="enlistReadyCount() + ' of ' + selectedEntries().length + ' ready'"></span>
+          </div>
+          <div class="fc-body">
+            <template x-if="selectedEntries().length === 0 && !enlist_active">
+              <p class="fc-empty">Select a model and it reports for duty here.</p>
+            </template>
+
+            <div class="fc-queue" x-show="selectedEntries().length > 0">
+              <template x-for="entry in selectedEntries()" :key="entry.model">
+                <button type="button" class="fc-queue-card"
+                        :class="enlist_shown === entry.model ? 'active' : ''"
+                        @click="enlist_shown = entry.model">
+                  <span class="fc-queue-state">
+                    <span x-show="enlistState(entry.model) === 'testing'" class="spinner-sm"></span>
+                    <span x-show="enlistState(entry.model) === 'ok'" style="color: var(--green);">&#10003;</span>
+                    <span x-show="enlistState(entry.model) === 'error'" style="color: var(--red);">&#10007;</span>
+                    <span x-show="enlistState(entry.model) === 'queued'" style="color: var(--text-dim);">&middot;&middot;&middot;</span>
+                  </span>
+                  <span class="fc-queue-model" x-text="entry.model"></span>
+                  <span class="fc-queue-meta" x-text="Number(entry.max_context || 0).toLocaleString() + ' ctx'"></span>
+                </button>
               </template>
             </div>
-            <div class="fc-bubble fc-error" x-show="first_contact.error">
-              <div class="fc-text" style="color: var(--red);" x-text="first_contact.error"></div>
+
+            <div class="fc-chat" x-show="fcReply() || fcError()">
+              <div class="fc-bubble fc-model" x-show="fcReply()">
+                <div class="fc-role" x-text="enlist_shown || 'Recruit'"></div>
+                <div class="fc-text" x-text="fcReply()"></div>
+              </div>
+              <div class="fc-bubble fc-error" x-show="fcError()">
+                <div class="fc-text" style="color: var(--red);" x-text="fcError()"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -243,7 +270,7 @@
 
     <div class="step-actions">
       <div></div>
-      <button class="btn btn-primary" @click="step = 2" :disabled="!config.model_name || !config.backend_url">
+      <button class="btn btn-primary" @click="step = 2" :disabled="(selectedEntries().length === 0 && !config.model_name) || !config.backend_url">
         Next
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       </button>
@@ -256,23 +283,22 @@
     <p class="step-desc">Connect this rig to your Grid account. Console issues a worker-only key that cannot spend credits or manage your account.</p>
 
     <div class="step-columns">
+      <!-- Left: credential + payout -->
       <div class="step-col">
-        <label class="field">
-          <span class="field-label">Grid Worker Name</span>
-          <input type="text" x-model="config.worker_name" placeholder="Text-Inference-Worker"
-                 :disabled="enrollment.status === 'activated'">
-        </label>
-
-        <div x-show="credential_mode === 'console'" class="install-card">
+        <div x-show="credential_mode === 'console'" class="cred-card">
+          <div class="cred-head">
+            <h3 class="cred-title">Secure Console connection</h3>
+            <p class="cred-sub">Approve this rig in Console and it receives a worker-only credential — it cannot spend credits or manage your account.</p>
+          </div>
           <template x-if="enrollment.status === 'idle' || enrollment.status === 'error'">
-            <div>
-              <button type="button" class="btn btn-primary" @click="connectGridAccount(enrollment.status === 'error')"
-                      :disabled="!config.worker_name.trim() || enrollment.busy">
-                <span x-show="!enrollment.busy">Connect Grid account</span>
-                <span x-show="enrollment.busy"><span class="spinner-sm"></span> Creating secure link...</span>
-              </button>
-              <p class="field-hint" style="margin-top: 0.6rem;">Google or wallet sign-in happens in Console. Your payout wallet stays off this rig.</p>
-            </div>
+            <button type="button" class="btn btn-primary" @click="connectGridAccount(enrollment.status === 'error')"
+                    :disabled="!config.worker_name.trim() || enrollment.busy">
+              <span x-show="!enrollment.busy" style="display: inline-flex; align-items: center; gap: 0.45rem;">
+                Connect Grid account
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+              </span>
+              <span x-show="enrollment.busy"><span class="spinner-sm"></span> Creating secure link...</span>
+            </button>
           </template>
 
           <template x-if="enrollment.status === 'pending' || enrollment.status === 'prepared'">
@@ -299,68 +325,115 @@
           <div x-show="enrollment.error" class="field-hint" style="color: var(--red); margin-top: 0.65rem;" x-text="enrollment.error"></div>
         </div>
 
-        <button type="button" class="btn-clear" style="margin-bottom: 1rem;"
+        <div x-show="credential_mode === 'manual'" class="cred-card">
+          <div class="cred-head">
+            <h3 class="cred-title">Existing API key</h3>
+            <p class="cred-sub">Use an account key you already created in Console. It carries your account's full inference rights.</p>
+          </div>
+          <label class="field" style="margin-bottom: 0.75rem;">
+            <span class="field-label">Grid API Key</span>
+            <input type="password" autocomplete="off" data-1p-ignore x-model="config.api_key" placeholder="grid_...">
+          </label>
+          <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/api-key" target="_blank" rel="noopener">
+            Manage keys
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+          </a>
+        </div>
+
+        <button type="button" class="btn btn-outline btn-sm cred-switch"
                 x-show="enrollment.status !== 'activated'"
-                @click="credential_mode = credential_mode === 'console' ? 'manual' : 'console'; enrollment.error = ''">
-          <span x-text="credential_mode === 'console' ? 'Advanced: use an existing API key' : 'Use secure Console connection instead'"></span>
+                @click="credential_mode = credential_mode === 'console' ? 'manual' : 'console'; enrollment.error = ''; clampConcurrencyForCredential()">
+          <span x-text="credential_mode === 'console' ? 'Use API key instead' : 'Use secure Console connection instead'"></span>
         </button>
 
-        <label class="field" x-show="credential_mode === 'manual'">
-          <span class="field-label">Existing Grid API Key</span>
-          <input type="password" x-model="config.api_key" placeholder="grid_...">
-          <span class="field-hint">For advanced multi-backend operators. Create and manage keys in <a href="https://console.aipowergrid.io/dashboard/api-key" target="_blank" rel="noopener">Console</a>.</span>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Grid Model Name <span class="optional">(how your model appears)</span></span>
-          <input type="text" x-model="config.grid_model_name" placeholder="e.g. grid/llama3.2:3b">
-          <div x-show="config.grid_model_name" x-transition
-               style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
-            <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;"></span>
-            <span style="font-size: 0.78rem; color: var(--green);">
-              Detected from model name
-            </span>
+        <div class="cred-card wallet-card-setup">
+          <div class="cred-head">
+            <h3 class="cred-title">Reward wallet</h3>
           </div>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Max Length <span class="optional">(tokens per response)</span></span>
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <input type="range" x-model="config.max_length" min="64" max="32768" step="64"
-                   style="flex: 1; accent-color: var(--accent);">
-            <span style="min-width: 3.5rem; text-align: right; font-size: 0.85rem; font-family: monospace; color: var(--text);"
-                  x-text="config.max_length"></span>
-          </div>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Max Simultaneous Jobs</span>
-          <input type="number" x-model="config.max_threads" min="1" max="16"
-                 :disabled="credential_mode === 'console'">
-          <div class="field-hint" x-show="credential_mode === 'console'">Secure Console enrollment creates one exact worker connection. Advanced account keys may use additional slots.</div>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Operating Schedule <span class="optional">(optional, local time)</span></span>
-          <textarea x-model="config.schedule" rows="4"
-                    placeholder='[{"days":"mon-fri","start":"18:00","end":"23:59","concurrency":0}]'></textarea>
-          <div class="field-hint">Use JSON windows to reduce capacity or pause with concurrency 0. Outside all windows, Max Simultaneous Jobs applies.</div>
-        </label>
-      </div>
-
-      <!-- Right column: Wallet -->
-      <div class="step-col step-col-side">
-        <div>
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.65rem;">
-            <span class="field-label" style="margin-bottom: 0;">Reward Wallet</span>
+          <div class="wallet-row">
             <span class="chain-badge">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#0000FF"/><path d="M8.5 4V20H11C17 20 17 8 11 8H8.5Z" fill="#fff"/></svg>
               Base
             </span>
+            <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">
+              Manage payout wallet
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+            </a>
           </div>
+        </div>
+      </div>
 
-          <p class="field-hint">Payouts use the Grid account that approves this worker or owns its advanced API key.</p>
-          <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Manage payout wallet</a>
+      <!-- Right: worker identity, model names, capacity, schedule -->
+      <div class="step-col step-col-side">
+        <label class="field">
+          <span class="field-label">Grid Worker Name</span>
+          <input type="text" x-model="config.worker_name" placeholder="Text-Inference-Worker"
+                 :disabled="enrollment.status === 'activated'">
+        </label>
+
+        <div class="field" x-show="selectedEntries().length > 0">
+          <span class="field-label">Model names on the Grid</span>
+          <div class="gridname-list">
+            <template x-for="entry in selectedEntries()" :key="entry.model">
+              <div class="gridname-row">
+                <span class="gridname-source" x-text="entry.model"></span>
+                <input type="text" x-model="entry.grid_model" :placeholder="entry.model">
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <label class="field" x-show="selectedEntries().length === 0">
+          <span class="field-label">Model name on the Grid</span>
+          <input type="text" x-model="config.grid_model_name" :placeholder="config.model_name">
+        </label>
+
+        <div class="field-pair">
+          <label class="field">
+            <span class="field-label">Max response <span class="optional">(tokens)</span></span>
+            <input type="number" x-model="config.max_length" min="64" max="32768" step="64">
+          </label>
+          <label class="field">
+            <span class="field-label">Simultaneous jobs</span>
+            <input type="number" x-model="config.max_threads" :min="1" :max="credential_mode === 'console' ? 1 : 16"
+                   :disabled="credential_mode === 'console'">
+          </label>
+        </div>
+        <div class="field-hint-slot" style="margin-top: -0.6rem;">
+          <span x-show="credential_mode === 'console'">A Console-enrolled credential is bound to one connection. Switch to an API key for parallel slots.</span>
+          <span x-show="credential_mode !== 'console' && selectedEntries().length > 1">With several models, each one gets its own connection — this applies per model.</span>
+        </div>
+
+        <div class="field">
+          <div class="sched-head">
+            <span class="field-label" style="margin-bottom: 0;">Operating schedule</span>
+            <span class="sched-summary" x-text="scheduleSummary()"></span>
+          </div>
+          <div class="sched-days">
+            <template x-for="day in sched.day_list" :key="day">
+              <button type="button" class="sched-day" :class="sched.days.includes(day) ? 'on' : ''"
+                      @click="toggleDay(day)" x-text="day.charAt(0).toUpperCase() + day.slice(1)"></button>
+            </template>
+          </div>
+          <div class="sched-times">
+            <label class="sched-time">
+              <span>From</span>
+              <input type="time" x-model="sched.start">
+            </label>
+            <label class="sched-time">
+              <span>To</span>
+              <input type="time" x-model="sched.end">
+            </label>
+            <label class="sched-time">
+              <span>Jobs in window</span>
+              <input type="number" x-model.number="sched.concurrency"
+                     :min="0" :max="credential_mode === 'console' ? 1 : 16">
+            </label>
+          </div>
+          <div class="field-hint-slot">
+            <span x-show="sched.concurrency === 0">0 pauses the worker inside this window; outside it, Simultaneous jobs applies.</span>
+            <span x-show="sched.concurrency !== 0 && !scheduleIsDefault()">Inside this window this replaces Simultaneous jobs; outside it, Simultaneous jobs applies.</span>
+          </div>
         </div>
       </div>
     </div>
@@ -380,104 +453,146 @@
 
   <!-- ========== STEP 3: Launch ========== -->
   <div class="step-panel" x-show="step === 3" x-transition>
+    <h2 x-text="deploy.started ? 'Joining the Grid' : 'Ready to Deploy'"></h2>
+    <p class="step-desc"
+       x-text="deploy.started
+         ? 'Each model registers on its own connection.'
+         : (selectedEntries().length > 1 ? 'Your models are about to join the grid.' : 'Your model is about to join the grid.')"></p>
 
-    <!-- Pre-launch: review -->
-    <template x-if="!deploy.started">
-      <div>
-        <h2>Ready to Deploy</h2>
-        <p class="step-desc">Your model is about to join the grid.</p>
+    <div class="step-columns">
+      <!-- Left: review, then deployment progress -->
+      <div class="step-col">
+        <template x-if="!deploy.started">
+          <div class="review-table">
+            <div class="review-row">
+              <span class="review-label">Engine</span>
+              <span class="review-value" x-text="config.engine_name || config.engine || 'OpenAI-compatible'"></span>
+            </div>
+            <template x-if="selectedEntries().length > 0">
+              <div>
+                <template x-for="entry in selectedEntries()" :key="entry.model">
+                  <div class="review-row">
+                    <span class="review-label">Model</span>
+                    <span class="review-value">
+                      <span x-text="entry.grid_model || entry.model"></span>
+                      <span style="color: var(--text-dim);" x-text="' · ' + Number(entry.max_context || 0).toLocaleString() + ' ctx'"></span>
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template x-if="selectedEntries().length === 0">
+              <div>
+                <div class="review-row">
+                  <span class="review-label">Model</span>
+                  <span class="review-value" x-text="config.model_name"></span>
+                </div>
+                <div class="review-row">
+                  <span class="review-label">Context</span>
+                  <span class="review-value" x-text="(config.max_context_length || '131072') + ' tokens'"></span>
+                </div>
+              </div>
+            </template>
+            <div class="review-row">
+              <span class="review-label">Max response</span>
+              <span class="review-value" x-text="(config.max_length || '512') + ' tokens'"></span>
+            </div>
+            <div class="review-row">
+              <span class="review-label">Capacity</span>
+              <span class="review-value" x-text="scheduleSummary() + ' · up to ' + config.max_threads + ' job' + (Number(config.max_threads) === 1 ? '' : 's')"></span>
+            </div>
+            <div class="review-row">
+              <span class="review-label">Wallet</span>
+              <span class="review-value">Managed in your Grid account</span>
+            </div>
+          </div>
+        </template>
 
-        <div class="review-table">
-          <div class="review-row">
-            <span class="review-label">Engine</span>
-            <span class="review-value" x-text="config.engine_name || config.engine || 'OpenAI-compatible'"></span>
-          </div>
-          <div class="review-row">
-            <span class="review-label">Model</span>
-            <span class="review-value" x-text="config.model_name"></span>
-          </div>
-          <div class="review-row">
-            <span class="review-label">Grid Name</span>
-            <span class="review-value" x-text="config.grid_model_name || ('grid/' + config.model_name)"></span>
-          </div>
-          <div class="review-row">
-            <span class="review-label">Context</span>
-            <span class="review-value" x-text="(config.max_context_length || '131072') + ' tokens'"></span>
-          </div>
-          <div class="review-row">
-            <span class="review-label">Max Response</span>
-            <span class="review-value" x-text="(config.max_length || '512') + ' tokens'"></span>
-          </div>
-          <div class="review-row">
-            <span class="review-label">Capacity</span>
-            <span class="review-value" x-text="config.schedule ? 'Scheduled, up to ' + config.max_threads : config.max_threads + ' simultaneous job' + (Number(config.max_threads) === 1 ? '' : 's')"></span>
-          </div>
-          <div class="review-row">
-            <span class="review-label">Wallet</span>
-            <span class="review-value">Managed in your Grid account</span>
-          </div>
-        </div>
+        <template x-if="deploy.started">
+          <div class="deploy-steps-card">
+            <div class="deploy-step" :class="deploy.phase >= 1 ? 'done' : 'active'">
+              <span class="deploy-dot"></span>
+              <span>Configuration saved</span>
+            </div>
+            <div class="deploy-step" :class="deploy.phase >= 2 ? 'done' : (deploy.phase === 1 ? 'active' : '')">
+              <span class="deploy-dot"></span>
+              <span>Registering with the Grid</span>
+            </div>
+            <div class="deploy-step" x-show="credential_mode === 'console'"
+                 :class="deploy.phase >= 3 ? 'done' : (deploy.phase === 2 ? 'active' : '')">
+              <span class="deploy-dot"></span>
+              <span>Verifying the worker route</span>
+            </div>
+            <div class="deploy-step" :class="deploy.done ? 'done' : ''">
+              <span class="deploy-dot"></span>
+              <span x-text="deploy.done ? (deploy.partial ? 'Some models are live' : 'Worker is live') : 'Waiting for Grid confirmation'"></span>
+            </div>
 
-        <div class="step-actions">
-          <button class="btn btn-outline" @click="step = 2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
-            Back
-          </button>
-          <button class="btn btn-primary btn-launch" @click="deployWorker()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            Deploy to Grid
-          </button>
+            <div class="deploy-outcome" x-show="deploy.done && deploy.partial" x-transition>
+              <p class="deploy-note">
+                <span x-text="deployConnectedCount()"></span> of <span x-text="deploy.backends.length"></span> connected. The rest keep retrying in the background — watch them on the dashboard.
+              </p>
+              <button class="btn btn-outline btn-sm" @click="deployWorker()">Deploy again</button>
+            </div>
+
+            <div class="deploy-outcome" x-show="deploy.error" x-transition>
+              <p style="color: var(--red); font-size: 0.85rem; margin: 0;" x-text="deploy.error"></p>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button class="btn btn-outline btn-sm" @click="deployWorker()">Deploy again</button>
+                <a class="btn btn-outline btn-sm" href="/logs">Open Logs</a>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Right: grid connection, present from the start -->
+      <div class="step-col step-col-side">
+        <div class="first-contact">
+          <div class="fc-label">
+            <span>Grid connection</span>
+            <span class="fc-count"
+                  x-text="deploy.backends.length ? deployConnectedCount() + ' of ' + deploy.backends.length + ' live' : 'not connected'"></span>
+          </div>
+          <div class="fc-body">
+            <div class="deploy-rail-body">
+              <template x-for="entry in selectedEntries()" :key="entry.model">
+                <div class="deploy-rail-row">
+                  <span class="status-dot" :class="railClass(entry.model)"></span>
+                  <span class="deploy-rail-model" x-text="entry.grid_model || entry.model"></span>
+                  <span class="deploy-rail-state" x-text="railLabel(entry.model)"></span>
+                </div>
+              </template>
+              <template x-if="selectedEntries().length === 0">
+                <div class="deploy-rail-row">
+                  <span class="status-dot paused"></span>
+                  <span class="deploy-rail-model" x-text="config.grid_model_name || config.model_name || '—'"></span>
+                  <span class="deploy-rail-state" x-text="railLabel(config.model_name)"></span>
+                </div>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
-    </template>
+    </div>
 
-    <!-- Deployment sequence -->
-    <template x-if="deploy.started">
-      <div class="deploy-sequence">
-        <div class="deploy-icon" :class="deploy.done ? 'landed' : (deploy.error ? '' : 'dropping')">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-          </svg>
-        </div>
-
-        <div class="deploy-steps">
-          <div class="deploy-step" :class="deploy.phase >= 1 ? 'done' : ''">
-            <span class="deploy-dot"></span>
-            <span>Saving configuration...</span>
-          </div>
-          <div class="deploy-step" :class="deploy.phase >= 2 ? 'done' : (deploy.phase === 1 ? 'active' : '')">
-            <span class="deploy-dot"></span>
-            <span>Waiting for Grid registration...</span>
-          </div>
-          <div class="deploy-step" :class="deploy.phase >= 3 ? 'done' : (deploy.phase === 2 ? 'active' : '')">
-            <span class="deploy-dot"></span>
-            <span x-text="credential_mode === 'console' ? 'Running Grid connectivity canary...' : 'Advanced key: registration check only'"></span>
-          </div>
-          <div class="deploy-step" :class="deploy.phase >= 4 ? 'done' : ''">
-            <span class="deploy-dot"></span>
-            <span x-text="deploy.done ? 'Worker is live!' : 'Waiting for Grid confirmation'"></span>
-          </div>
-        </div>
-
-        <div class="deploy-status" x-show="deploy.done" x-transition>
-          <p class="deploy-live">Ready to receive Grid jobs</p>
-          <p style="color: var(--text-dim); font-size: 0.82rem; margin-top: 0.35rem;"
-             x-text="(config.grid_model_name || ('grid/' + config.model_name)) + ' on AI Power Grid'"></p>
-          <p style="color: var(--text-dim); font-size: 0.78rem; margin-top: 0.35rem;"
-             x-text="deploy.verification"></p>
-          <button class="btn btn-primary" style="margin-top: 1.25rem;" @click="window.location.href = '/'">
-            Open Dashboard
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
-          </button>
-        </div>
-
-        <div class="deploy-error" x-show="deploy.error" x-transition>
-          <p style="color: var(--red); font-size: 0.85rem;" x-text="deploy.error"></p>
-          <button class="btn btn-outline btn-sm" style="margin-top: 0.75rem;" @click="deploy.started = false">Back</button>
-          <a class="btn btn-outline btn-sm" style="margin-top: 0.75rem;" href="/logs">Open Logs</a>
-        </div>
-      </div>
-    </template>
+    <div class="step-actions">
+      <button class="btn btn-outline" @click="cancelDeploy(); step = 2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        Back
+      </button>
+      <button class="btn btn-primary btn-launch" @click="deployWorker()" x-show="!deploy.started">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Deploy to Grid
+      </button>
+      <button class="btn btn-outline" @click="cancelDeploy()" x-show="deploy.started && !deploy.done && !deploy.error">
+        Cancel
+      </button>
+      <button class="btn btn-primary" @click="window.location.href = '/'" x-show="deploy.done">
+        Open Dashboard
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
   </div>
 
 </div>
@@ -507,6 +622,11 @@ function setupWizard() {
       schedule: '',
     },
     available_models: [],
+    model_entries: [],
+    enlist_results: {},   // model -> { status: 'queued'|'testing'|'ok'|'error', reply, error }
+    enlist_queue: [],
+    enlist_active: '',    // model currently testing
+    enlist_shown: '',     // model whose reply/error the bubble shows
     checking_url: false,
     url_check: { reachable: null, checked: false },
     pulling_model: false,
@@ -515,10 +635,16 @@ function setupWizard() {
     detected_context_length: null,
     detecting_context: false,
     context_fetch_done: false,
-    first_contact: { prompt: '', reply: '', error: '', loading: false, slow: false },
     credential_mode: 'console',
     enrollment: { status: 'idle', busy: false, error: '', authorize_url: '', worker_name: '' },
-    deploy: { started: false, phase: 0, done: false, error: '', verification: '' },
+    deploy: { started: false, phase: 0, done: false, error: '', backends: [], partial: false, last_error: '', cancelled: false },
+    sched: {
+      day_list: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+      days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+      start: '00:00',
+      end: '23:59',
+      concurrency: 1,
+    },
 
     async init() {
       await this.runDetect();
@@ -526,8 +652,174 @@ function setupWizard() {
 
     updateGridModelName() {
       if (this.config.model_name) {
-        this.config.grid_model_name = 'grid/' + this.config.model_name;
+        this.config.grid_model_name = this.config.model_name;
       }
+    },
+
+    // A Console-enrolled credential is one connection: clamp both concurrency
+    // controls so the wizard can't build a config the grid will reject.
+    clampConcurrencyForCredential() {
+      if (this.credential_mode !== 'console') return;
+      this.config.max_threads = '1';
+      if (Number(this.sched.concurrency) > 1) this.sched.concurrency = 1;
+    },
+
+    toggleDay(day) {
+      const days = this.sched.days;
+      const i = days.indexOf(day);
+      if (i === -1) days.push(day); else days.splice(i, 1);
+    },
+
+    // 24x7 at full capacity is the default, and the grid reads "no schedule"
+    // exactly that way — so the common case writes nothing at all.
+    scheduleIsDefault() {
+      return this.sched.days.length === 7 &&
+             this.sched.start === '00:00' && this.sched.end === '23:59' &&
+             Number(this.sched.concurrency) === Number(this.config.max_threads || 1);
+    },
+
+    scheduleSummary() {
+      if (this.sched.days.length === 0) return 'No days selected — worker stays off';
+      if (this.scheduleIsDefault()) return 'Always on';
+      const days = this.sched.days.length === 7 ? 'Every day' : this.sched.day_list
+        .filter(d => this.sched.days.includes(d))
+        .map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(' ');
+      const jobs = Number(this.sched.concurrency) === 0 ? 'paused' : this.sched.concurrency + ' job' + (Number(this.sched.concurrency) === 1 ? '' : 's');
+      return `${days} · ${this.sched.start}–${this.sched.end} · ${jobs}`;
+    },
+
+    scheduleJson() {
+      if (this.scheduleIsDefault()) return '';
+      if (this.sched.days.length === 0) return JSON.stringify([{ concurrency: 0 }]);
+      const ordered = this.sched.day_list.filter(d => this.sched.days.includes(d));
+      return JSON.stringify([{
+        days: ordered.join(','),
+        start: this.sched.start,
+        end: this.sched.end,
+        concurrency: Number(this.sched.concurrency),
+      }]);
+    },
+
+    // Rebuild the selectable roster from a fresh model list, preserving any
+    // selections and edited grid names for models that are still present.
+    rebuildModelEntries(models) {
+      const prev = Object.fromEntries(this.model_entries.map(e => [e.model, e]));
+      this.model_entries = (models || []).map(m => prev[m] || ({
+        model: m, grid_model: m, selected: false, context: null, max_context: 40960, ctx_touched: false,
+      }));
+    },
+
+    selectedEntries() {
+      return this.model_entries.filter(e => e.selected);
+    },
+
+    onModelToggled(entry) {
+      if (entry.selected) {
+        // The newest selection becomes the primary for back-compat fields;
+        // context detection and enlistment run per model.
+        this.config.model_name = entry.model;
+        this.config.grid_model_name = entry.grid_model;
+        this.fetchEntryContext(entry);
+        this.applyContextDefaults();
+        this.enqueueEnlist(entry.model);
+      } else {
+        this.applyContextDefaults();
+        this.enlist_queue = this.enlist_queue.filter(m => m !== entry.model);
+        delete this.enlist_results[entry.model];
+        if (this.enlist_shown === entry.model) this.enlist_shown = '';
+        if (this.config.model_name === entry.model) {
+          const rest = this.selectedEntries();
+          this.config.model_name = rest.length ? rest[rest.length - 1].model : '';
+          this.config.grid_model_name = rest.length ? rest[rest.length - 1].grid_model : '';
+        }
+      }
+    },
+
+    async fetchEntryContext(entry) {
+      if (entry.context) return;
+      try {
+        const r = await fetch('/api/setup/context-length', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: this.config.backend_url,
+            engine: this.config.engine,
+            model: entry.model,
+            api_key: this.config.backend_api_key,
+          }),
+        });
+        const d = await r.json();
+        if (d.context_length) {
+          entry.context = d.context_length;
+          entry.max_context = d.context_length;
+          this.applyContextDefaults();
+        }
+      } catch (e) { /* row keeps "detecting" off; runtime re-detects anyway */ }
+    },
+
+    enlistReadyCount() {
+      return this.selectedEntries().filter(e => this.enlistState(e.model) === 'ok').length;
+    },
+
+    // Bound advertised requests conservatively across a shared roster. Backend
+    // memory allocation is configured independently by the operator.
+    applyContextDefaults() {
+      const entries = this.selectedEntries();
+      for (const e of entries) {
+        if (e.ctx_touched || !e.context) continue;
+        e.max_context = entries.length > 1 ? Math.min(e.context, 8192) : e.context;
+      }
+    },
+
+    enlistState(model) {
+      return (this.enlist_results[model] || {}).status || 'queued';
+    },
+
+    fcReply() {
+      return (this.enlist_results[this.enlist_shown] || {}).reply || '';
+    },
+
+    fcError() {
+      return (this.enlist_results[this.enlist_shown] || {}).error || '';
+    },
+
+    enqueueEnlist(model) {
+      if (this.enlist_queue.includes(model) || this.enlist_active === model) return;
+      this.enlist_results[model] = { status: 'queued', reply: '', error: '' };
+      this.enlist_queue.push(model);
+      if (!this.enlist_active) this.drainEnlistQueue();
+    },
+
+    // One model at a time: parallel tests would force the backend to cold-load
+    // several models at once and time them all out.
+    async drainEnlistQueue() {
+      while (this.enlist_queue.length > 0) {
+        const model = this.enlist_queue.shift();
+        this.enlist_active = model;
+        this.enlist_results[model] = { status: 'testing', reply: '', error: '' };
+        try {
+          const r = await fetch('/api/setup/test-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: this.config.backend_url,
+              engine: this.config.engine,
+              model: model,
+              api_key: this.config.backend_api_key,
+            }),
+          });
+          const d = await r.json();
+          if (d.ok) {
+            this.enlist_results[model] = { status: 'ok', reply: d.reply, error: '' };
+          } else {
+            this.enlist_results[model] = { status: 'error', reply: '', error: d.error || 'No response from recruit' };
+          }
+        } catch (e) {
+          this.enlist_results[model] = { status: 'error', reply: '', error: 'Failed to reach recruit' };
+        }
+        this.enlist_shown = model;
+      }
+      this.enlist_active = '';
     },
 
     async fetchContextLength() {
@@ -556,46 +848,64 @@ function setupWizard() {
         this.detecting_context = false;
         this.context_fetch_done = true;
       }
-      this.testModel();
     },
 
-    async testModel() {
-      if (!this.config.backend_url || !this.config.model_name) return;
-      const promptText = "Enlisting " + this.config.model_name + " for grid service...";
-      this.first_contact = { prompt: promptText, reply: '', error: '', loading: true, slow: false };
-      const slowTimer = setTimeout(() => { this.first_contact.slow = true; }, 4000);
-      try {
-        const r = await fetch('/api/setup/test-model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: this.config.backend_url,
-            engine: this.config.engine,
-            model: this.config.model_name,
-            api_key: this.config.backend_api_key,
-          }),
-        });
-        const d = await r.json();
-        if (d.ok) {
-          this.first_contact.prompt = d.prompt;
-          this.first_contact.reply = d.reply;
-        } else {
-          this.first_contact.error = d.error || 'No response from recruit';
-        }
-      } catch (e) {
-        this.first_contact.error = 'Failed to reach recruit';
-      } finally {
-        clearTimeout(slowTimer);
-        this.first_contact.loading = false;
-      }
+    railBackend(model) {
+      const wanted = (model || '').trim();
+      return this.deploy.backends.find(b => b.model === wanted || b.grid_model === wanted);
+    },
+
+    railClass(model) {
+      const b = this.railBackend(model);
+      if (!b) return 'paused';
+      if (b.connected > 0) return 'online';
+      return b.connection_error ? 'error' : 'paused';
+    },
+
+    railLabel(model) {
+      const b = this.railBackend(model);
+      if (!b) return this.deploy.started ? 'Connecting…' : 'Not connected';
+      if (b.connected > 0) return 'Live';
+      return b.connection_error ? 'Retrying' : 'Connecting…';
+    },
+
+    deployConnectedCount() {
+      return this.deploy.backends.filter(b => b.connected > 0).length;
+    },
+
+    deployState(b) {
+      if (b.connected > 0) return 'online';
+      if (b.connection_error) return 'retrying';
+      return 'connecting';
+    },
+
+    deployFailureReason() {
+      const errs = [...new Set(this.deploy.backends.map(b => b.connection_error).filter(Boolean))];
+      if (errs.length) return errs.join(' ');
+      return this.deploy.last_error ||
+        'Configuration saved, but no model reached the Grid yet.';
+    },
+
+    cancelDeploy() {
+      // The worker keeps whatever config was saved; this only stops the wizard
+      // from watching. Nothing is torn down mid-registration.
+      this.deploy.cancelled = true;
+      this.deploy.started = false;
+      this.deploy.phase = 0;
+      this.deploy.error = '';
     },
 
     async deployWorker() {
-      this.deploy = { started: true, phase: 0, done: false, error: '', verification: '' };
+      this.deploy = { started: true, phase: 0, done: false, error: '',
+                      backends: [], partial: false, last_error: '', cancelled: false };
 
       const wait = ms => new Promise(r => setTimeout(r, ms));
 
       try {
+        if (this.credential_mode === 'console' && this.selectedEntries().length > 1) {
+          this.deploy.error = 'Console enrollment supports one model. Select one model or use the Advanced account-key option.';
+          return;
+        }
         const isOllama = this.config.engine === 'ollama';
         const payload = {
           GRID_WORKER_NAME: this.config.worker_name.trim(),
@@ -615,8 +925,30 @@ function setupWizard() {
         if (this.config.max_length) payload.GRID_MAX_LENGTH = this.config.max_length;
         if (this.config.max_context_length) payload.GRID_MAX_CONTEXT_LENGTH = this.config.max_context_length;
         if (this.config.max_threads) payload.GRID_MAX_THREADS = this.config.max_threads;
-        if (this.config.schedule) payload.GRID_SCHEDULE = this.config.schedule;
+        const scheduleJson = this.scheduleJson();
+        payload.GRID_SCHEDULE = scheduleJson;
         if (this.config.backend_api_key) payload.OPENAI_API_KEY = this.config.backend_api_key;
+
+        // Roster selections ship as GRID_BACKENDS: every chosen model becomes
+        // its own grid connection. A single selection uses the same path, so
+        // adding a second model later is an edit, not a migration.
+        const chosen = this.selectedEntries();
+        if (chosen.length > 0) {
+          const single = chosen.length === 1 ? Math.max(1, parseInt(this.config.max_threads) || 1) : 1;
+          payload.GRID_BACKENDS = JSON.stringify(chosen.map(e => {
+            const entry = {
+              type: isOllama ? 'ollama' : 'openai',
+              url: isOllama ? this.config.backend_url : this.config.backend_url + '/v1',
+              model: e.model,
+              grid_model: (e.grid_model || e.model).trim(),
+              concurrency: single,
+            };
+            if (this.credential_mode === 'console') entry.name = this.enrollment.worker_name || this.config.worker_name.trim();
+            if (e.max_context) entry.max_context = Number(e.max_context);
+            if (this.config.backend_api_key) entry.api_key = this.config.backend_api_key;
+            return entry;
+          }));
+        }
 
         const r = await fetch('/api/setup/complete', {
           method: 'POST',
@@ -627,18 +959,26 @@ function setupWizard() {
         const d = await r.json();
 
         if (!r.ok || !d.ok) {
-          this.deploy.error = 'Setup failed';
+          this.deploy.error = d.error || 'Setup failed';
           return;
         }
 
         // Config saved is not registration. Only Grid's ready handshake is live.
         this.deploy.phase = 1;
-        for (let attempt = 0; attempt < 90; attempt++) {
+        // Several models mean several cold loads, serialized on the backend —
+        // three can take a couple of minutes. A per-backend connection_error
+        // during that window is transient (that connection is still retrying),
+        // so only a process-level worker_error is fatal here; everything else
+        // is decided by what is actually connected when the window closes.
+        for (let attempt = 0; attempt < 150; attempt++) {
+          if (this.deploy.cancelled) return;
           const statusResponse = await fetch('/api/status', { signal: AbortSignal.timeout(5000) });
           if (!statusResponse.ok) throw new Error('Worker status unavailable. Open Logs for details.');
           const status = await statusResponse.json();
-          if (status.worker_error || status.connection_error) {
-            this.deploy.error = status.worker_error || status.connection_error;
+          this.deploy.backends = status.backends || [];
+          if (status.connection_error) this.deploy.last_error = status.connection_error;
+          if (status.worker_error) {
+            this.deploy.error = status.worker_error;
             return;
           }
           if (status.grid_connected) {
@@ -654,18 +994,23 @@ function setupWizard() {
                 this.deploy.error = canary.error || 'Grid connectivity canary failed. Open Logs and try again.';
                 return;
               }
-              this.deploy.verification = 'Exact worker route verified. No credits, den, or rewards were created by this test.';
-            } else {
-              this.deploy.verification = 'Grid registration confirmed. Exact-worker canary requires secure Console enrollment.';
             }
             this.deploy.phase = 3;
             this.deploy.phase = 4;
             this.deploy.done = true;
             return;
           }
-          await wait(1000);
+          await wait(2000);
+          if (this.deploy.cancelled) return;
         }
-        this.deploy.error = 'Configuration saved, but Grid connection is not confirmed. Open Logs to check progress.';
+        // Window closed: partial is a success worth opening the dashboard for.
+        if (this.credential_mode === 'manual' && this.deploy.backends.some(b => b.connected > 0)) {
+          this.deploy.phase = 4;
+          this.deploy.done = true;
+          this.deploy.partial = true;
+          return;
+        }
+        this.deploy.error = this.deployFailureReason();
 
       } catch (e) {
         this.deploy.error = e.name === 'TimeoutError'
@@ -675,6 +1020,10 @@ function setupWizard() {
     },
 
     async connectGridAccount(restart = false) {
+      if (this.selectedEntries().length > 1) {
+        this.enrollment.error = 'Select one model for Console enrollment, or use the Advanced account-key option for multiple models.';
+        return;
+      }
       this.enrollment = {
         status: 'idle', busy: true, error: '', authorize_url: '',
         worker_name: this.config.worker_name.trim(),
@@ -741,6 +1090,7 @@ function setupWizard() {
       this.config.engine_name = b.name;
       this.config.api_type = b.api_type;
       this.available_models = b.models || [];
+      this.rebuildModelEntries(this.available_models);
       this.config.model_name = '';
       this.config.grid_model_name = '';
       this.url_check = { reachable: true, checked: true, name: b.name, version: b.version };
@@ -782,6 +1132,7 @@ function setupWizard() {
           this.config.engine = d.engine || '';
           this.config.engine_name = d.name || '';
           this.available_models = d.models || [];
+          this.rebuildModelEntries(this.available_models);
         }
       } finally {
         this.checking_url = false;
@@ -808,6 +1159,7 @@ function setupWizard() {
           });
           const ld = await lr.json();
           this.available_models = ld.models || [];
+          this.rebuildModelEntries(this.available_models);
         } else {
           this.pull_error = d.error;
         }

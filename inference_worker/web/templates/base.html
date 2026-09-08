@@ -58,8 +58,7 @@
           <span class="status-pill">
             <span class="status-dot" :class="statusClass()"></span>
             <span x-text="statusLabel()"></span>
-            <span class="pill-model" x-show="s.config?.model_name"
-                  x-text="s.config?.grid_model_name || s.config?.model_name"></span>
+            <span class="pill-model" x-show="pillDetail()" x-text="pillDetail()"></span>
           </span>
           <button class="btn btn-outline btn-sm" @click="restart()" :disabled="restarting">
             <span x-show="!restarting" style="display: inline-flex; align-items: center; gap: 0.4rem;">
@@ -127,6 +126,20 @@
         if (this.s.connection_error) return 'Connection error';
         if (!this.s.grid_connected) return 'Connecting';
         return 'Online';
+      },
+
+      // One model shows its grid name; several show the live count, because
+      // naming just one of three reads as only that one being connected.
+      pillDetail() {
+        const backends = this.s.backends || [];
+        if (backends.length > 1) {
+          const live = backends.filter(b => b.connected > 0).length;
+          return live === backends.length
+            ? backends.length + ' models'
+            : live + ' of ' + backends.length + ' models';
+        }
+        if (backends.length === 1) return backends[0].grid_model || backends[0].model;
+        return this.s.config?.grid_model_name || this.s.config?.model_name || '';
       },
 
       async restart() {

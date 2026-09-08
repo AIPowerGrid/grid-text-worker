@@ -30,6 +30,7 @@ _PERSISTED_BACKEND_SETTINGS = frozenset(
     {
         "BACKEND_TYPE",
         "GRID_API_KEY",
+        "GRID_BACKENDS",
         "GRID_MAX_CONTEXT_LENGTH",
         "GRID_MAX_LENGTH",
         "GRID_MAX_THREADS",
@@ -44,6 +45,14 @@ _PERSISTED_BACKEND_SETTINGS = frozenset(
     }
 )
 _SCHEDULE_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+
+class SettingsValidationError(ValueError):
+    """A validation failure with an explicitly authored public message."""
+
+    def __init__(self, public_message: str):
+        super().__init__(public_message)
+        self.public_message = public_message
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -110,38 +119,44 @@ def _set_auth_cookie(response, request: Request) -> None:
 
 def _validated_backend_settings(value: object) -> dict:
     if not isinstance(value, dict):
-        raise ValueError("Settings payload must be an object")
+        raise SettingsValidationError("Settings payload must be an object")
     if set(value) - _PERSISTED_BACKEND_SETTINGS:
-        raise ValueError("Settings payload contains unsupported fields")
+        raise SettingsValidationError("Settings payload contains unsupported fields")
     form = {}
     for key, raw in value.items():
         text = str(raw) if raw is not None else ""
-        limit = 8192 if key == "GRID_SCHEDULE" else 4096
+        limit = 16384 if key == "GRID_BACKENDS" else (8192 if key == "GRID_SCHEDULE" else 4096)
         if len(text) > limit or "\n" in text or "\r" in text:
-            raise ValueError(f"Invalid value for {key}")
+            raise SettingsValidationError(f"Invalid value for {key}")
         form[key] = text
     for key in ("OLLAMA_URL", "OPENAI_URL"):
         if key in form and form[key]:
-            form[key] = validated_backend_url(form[key])
+            try:
+                form[key] = validated_backend_url(form[key])
+            except ValueError as exc:
+                raise SettingsValidationError("Invalid backend URL") from exc
     if "GRID_SCHEDULE" in form:
         form["GRID_SCHEDULE"] = _validated_schedule(form["GRID_SCHEDULE"])
+    if "GRID_BACKENDS" in form:
+        form["GRID_BACKENDS"] = _validated_backends_json(form["GRID_BACKENDS"])
+        _validate_backend_names(form["GRID_BACKENDS"], form.get("GRID_WORKER_NAME", Settings.GRID_WORKER_NAME))
     if "BACKEND_TYPE" in form and form["BACKEND_TYPE"] not in {"ollama", "openai"}:
-        raise ValueError("Unsupported backend type")
+        raise SettingsValidationError("Unsupported backend type")
     if "GRID_NSFW" in form and form["GRID_NSFW"].lower() not in {"true", "false"}:
-        raise ValueError("GRID_NSFW must be true or false")
+        raise SettingsValidationError("GRID_NSFW must be true or false")
     for key, lower, upper in (
         ("GRID_MAX_THREADS", 1, 16),
         ("GRID_MAX_LENGTH", 64, 32768),
-        ("GRID_MAX_CONTEXT_LENGTH", 256, 131072),
+        ("GRID_MAX_CONTEXT_LENGTH", 256, 1048576),
     ):
         if key not in form or not form[key]:
             continue
         try:
             number = int(form[key])
         except ValueError as exc:
-            raise ValueError(f"{key} must be an integer") from exc
+            raise SettingsValidationError(f"{key} must be an integer") from exc
         if not lower <= number <= upper:
-            raise ValueError(f"{key} is outside the supported range")
+            raise SettingsValidationError(f"{key} is outside the supported range")
         form[key] = str(number)
     return form
 
@@ -151,19 +166,19 @@ def _validated_schedule(value: object) -> str:
     if value is None or value == "":
         return ""
     if not isinstance(value, str) or len(value) > 8192:
-        raise ValueError("Schedule must be JSON text")
+        raise SettingsValidationError("Schedule must be JSON text")
     try:
         windows = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise ValueError("Schedule must be valid JSON") from exc
+        raise SettingsValidationError("Schedule must be valid JSON") from exc
     if not isinstance(windows, list) or len(windows) > 32:
-        raise ValueError("Schedule must be a list of at most 32 windows")
+        raise SettingsValidationError("Schedule must be a list of at most 32 windows")
 
     for window in windows:
         if not isinstance(window, dict):
-            raise ValueError("Each schedule window must be an object")
+            raise SettingsValidationError("Each schedule window must be an object")
         if set(window) - {"days", "start", "end", "concurrency"}:
-            raise ValueError("Schedule window contains an unknown field")
+            raise SettingsValidationError("Schedule window contains an unknown field")
         days = str(window.get("days") or "daily").strip().lower()
         if days not in {"*", "all", "daily"}:
             for part in days.split(","):
@@ -171,18 +186,79 @@ def _validated_schedule(value: object) -> str:
                 if len(bounds) not in {1, 2} or any(
                     item not in _SCHEDULE_DAYS for item in bounds
                 ):
-                    raise ValueError("Schedule days must use mon-sun names")
+                    raise SettingsValidationError("Schedule days must use mon-sun names")
         for field in ("start", "end"):
             if field in window and not _TIME_RE.fullmatch(str(window[field])):
-                raise ValueError(f"Schedule {field} must use 24-hour HH:MM")
+                raise SettingsValidationError(f"Schedule {field} must use 24-hour HH:MM")
         concurrency = window.get("concurrency")
         if (
             isinstance(concurrency, bool)
             or not isinstance(concurrency, int)
             or not 0 <= concurrency <= 16
         ):
-            raise ValueError("Schedule concurrency must be an integer from 0 to 16")
+            raise SettingsValidationError("Schedule concurrency must be an integer from 0 to 16")
     return json.dumps(windows, separators=(",", ":"))
+
+
+def _validated_backends_json(value: object) -> str:
+    """Validate and canonicalize the multi-model roster JSON."""
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or len(value) > 16384:
+        raise SettingsValidationError("Backends must be JSON text")
+    try:
+        entries = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise SettingsValidationError("Backends must be valid JSON") from exc
+    if not isinstance(entries, list) or not entries or len(entries) > 16:
+        raise SettingsValidationError("Backends must be a list of 1-16 entries")
+    allowed = {"name", "type", "url", "api_key", "model", "grid_model", "concurrency", "schedule", "paused", "max_context", "modalities", "vision"}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise SettingsValidationError("Each backend must be an object")
+        if set(entry) - allowed:
+            raise SettingsValidationError("Backend entry contains an unknown field")
+        for field in ("name", "type", "url", "api_key", "model", "grid_model"):
+            if field in entry and (not isinstance(entry[field], str) or len(entry[field]) > 4096 or any(c in entry[field] for c in "\r\n")):
+                raise SettingsValidationError(f"Invalid backend {field}")
+        if not (entry.get("model") or "").strip():
+            raise SettingsValidationError("Each backend needs a model")
+        entry["type"] = entry.get("type", "openai").lower()
+        if entry["type"] not in {"ollama", "openai"}:
+            raise SettingsValidationError("Unsupported backend type")
+        if entry.get("url"):
+            try:
+                entry["url"] = validated_backend_url(str(entry["url"]))
+            except ValueError as exc:
+                raise SettingsValidationError("Invalid backend URL") from exc
+        concurrency = entry.get("concurrency", 1)
+        if isinstance(concurrency, bool) or not isinstance(concurrency, int) or not 0 <= concurrency <= 16:
+            raise SettingsValidationError("Backend concurrency must be an integer from 0 to 16")
+        if "schedule" in entry:
+            entry["schedule"] = _validated_schedule(entry["schedule"])
+        for field in ("paused", "vision"):
+            if field in entry and not isinstance(entry[field], bool):
+                raise SettingsValidationError(f"Backend {field} must be true or false")
+        if "modalities" in entry:
+            mods = entry["modalities"]
+            if not isinstance(mods, list) or not mods or any(m not in ("text", "image", "video") for m in mods):
+                raise SettingsValidationError("Backend modalities must contain text, image, or video")
+        if "max_context" in entry:
+            ctx = entry["max_context"]
+            if isinstance(ctx, bool) or not isinstance(ctx, int) or (ctx != 0 and not 256 <= ctx <= 1048576):
+                raise SettingsValidationError("Backend max_context must be zero (auto) or an integer from 256 to 1048576")
+    return json.dumps(entries, separators=(",", ":"))
+
+
+def _validate_backend_names(raw: str, worker_name: str) -> None:
+    from ..config import _slug
+    names = set()
+    for entry in json.loads(raw or "[]"):
+        model = entry.get("grid_model") or f"grid/{entry['model']}"
+        name = entry.get("name") or f"{worker_name}-{_slug(model)}"
+        if name in names or "#" in name:
+            raise SettingsValidationError("Backend names must be unique and must not contain #")
+        names.add(name)
 
 
 def _enrolled_settings_error(form: dict) -> str | None:
@@ -203,6 +279,13 @@ def _enrolled_settings_error(form: dict) -> str | None:
         window.get("concurrency", 1) > 1 for window in json.loads(schedule)
     ):
         return "Console-enrolled credentials support one connection; scheduled concurrency cannot exceed one"
+    raw = form.get("GRID_BACKENDS")
+    entries = (json.loads(raw) if raw else []) if "GRID_BACKENDS" in form else _backends_config()
+    if entries and (len(entries) != 1 or entries[0].get("name") != enrolled_name):
+        return "Console-enrolled credentials require one backend with the exact enrolled worker name"
+    for entry in entries:
+        if entry.get("concurrency", 1) > 1 or any(w["concurrency"] > 1 for w in json.loads(entry.get("schedule") or "[]")):
+            return "Console-enrolled credentials support one connection per rig"
     return None
 
 
@@ -217,6 +300,7 @@ async def setup_guard(request: Request, call_next):
         or path.startswith("/api/")
         or path.startswith("/setup")
         or path == "/login"
+        or path == "/logs"
     ):
         return await call_next(request)
     if not worker_state["setup_complete"]:
@@ -372,7 +456,7 @@ async def api_test_model(request: Request):
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 256,
+        "max_tokens": 600,
         "temperature": 0.2,
     }
     if engine == "ollama":
@@ -441,12 +525,14 @@ async def api_complete_setup(request: Request):
     """Save config and start the worker."""
     try:
         form = _validated_backend_settings(await request.json())
+    except SettingsValidationError as exc:
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
     if error := _enrolled_settings_error(form):
         return JSONResponse({"ok": False, "error": error}, status_code=400)
 
-    write_env(form)
+    write_env(form, delete_empty=True)
     reload_settings(form)
 
     worker_state["setup_complete"] = True
@@ -511,6 +597,48 @@ async def dashboard(request: Request):
     })
 
 
+def _backend_rows() -> list[dict]:
+    """Per-backend live view: spec + the states of its connections.
+
+    Connection names are the backend name plus optional `#N` suffixes
+    (_connection_names), so prefix-matching on `name` or `name#` is exact.
+    """
+    from ..config import load_backends
+    from ..ws_client import LIVE_BACKENDS
+
+    active = worker_state["workers"] if worker_state["running"] else {}
+    rows = []
+    for spec in load_backends():
+        if not spec.model_name:
+            continue  # unconfigured scalar placeholder (pre-setup) — not a real backend
+        live = LIVE_BACKENDS.get(spec.name, spec)
+        conns = [
+            w for name, w in active.items()
+            if name == spec.name or name.startswith(f"{spec.name}#")
+        ]
+        jobs = sum(getattr(w, "_jobs_completed", 0) for w in conns)
+        den = sum(getattr(w, "_total_den", 0.0) for w in conns)
+        rows.append({
+            "name": spec.name,
+            "model": spec.model_name,
+            "grid_model": spec.grid_model_name,
+            "backend_type": spec.backend_type,
+            "url": spec.url,
+            "concurrency": spec.concurrency,
+            "max_context": spec.max_context,
+            "schedule": spec.schedule if spec.schedule_declared else None,
+            "modalities": spec.modalities if spec.modalities_declared else None,
+            "has_api_key": bool(spec.api_key),
+            "paused": bool(getattr(live, "paused", False)),
+            "connected": sum(1 for w in conns if w.connected),
+            "expected": 0 if getattr(live, "paused", False) else max(spec.concurrency, 0),
+            "connection_error": next((w.connection_error for w in conns if w.connection_error), None),
+            "jobs_completed": jobs,
+            "den_earned": den,
+        })
+    return rows
+
+
 @app.get("/api/status")
 async def api_status():
     workers = list(worker_state["workers"].values()) if worker_state["running"] else []
@@ -519,6 +647,7 @@ async def api_status():
     connection_error = next((w.connection_error for w in workers if w.connection_error), None)
 
     return {
+        "backends": _backend_rows(),
         "worker_running": worker_state["running"],
         "grid_connected": bool(expected) and connected == len(expected),
         "connected_workers": connected,
@@ -586,6 +715,8 @@ async def save_settings(request: Request):
     """Save settings to .env and update in-memory config."""
     try:
         form = _validated_backend_settings(await request.json())
+    except SettingsValidationError as exc:
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
     if error := _enrolled_settings_error(form):
@@ -596,6 +727,22 @@ async def save_settings(request: Request):
     for secret_name in ("GRID_API_KEY", "OPENAI_API_KEY"):
         if not form.get(secret_name):
             form.pop(secret_name, None)
+
+    # The same rule for per-backend keys inside GRID_BACKENDS: the page never
+    # sees them, so entries coming back without one keep the stored key.
+    if form.get("GRID_BACKENDS"):
+        stored = {
+            (e.get("type"), e.get("url"), e.get("model")): e.get("api_key")
+            for e in _backends_config()
+            if e.get("api_key")
+        }
+        entries = json.loads(form["GRID_BACKENDS"])
+        for entry in entries:
+            if not entry.get("api_key"):
+                kept = stored.get((entry.get("type"), entry.get("url"), entry.get("model")))
+                if kept:
+                    entry["api_key"] = kept
+        form["GRID_BACKENDS"] = json.dumps(entries, separators=(",", ":"))
 
     write_env(form, delete_empty=True)
     reload_settings(form)
@@ -610,6 +757,190 @@ async def restart_worker():
     await stop_worker()
     await start_worker()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Backends (multi-model roster)
+# ---------------------------------------------------------------------------
+def _backends_config() -> list[dict]:
+    """The effective roster as JSON-ready entries.
+
+    When GRID_BACKENDS is unset this materializes the classic single-backend
+    env vars, so the first roster edit converts a legacy config in place and
+    every entry is editable from then on.
+    """
+    from ..config import load_backends
+    entries = []
+    for b in load_backends():
+        if not b.model_name:
+            continue  # pre-setup placeholder
+        entry = {
+            "name": b.name,
+            "type": b.backend_type,
+            "url": b.url,
+            "model": b.model_name,
+            "grid_model": b.grid_model_name,
+            "concurrency": b.concurrency,
+        }
+        if b.max_context:
+            entry["max_context"] = b.max_context
+        if b.api_key:
+            entry["api_key"] = b.api_key
+        if b.schedule_declared:
+            entry["schedule"] = b.schedule
+        if b.modalities_declared:
+            entry["modalities"] = b.modalities
+        if b.paused:
+            entry["paused"] = True
+        entries.append(entry)
+    return entries
+
+
+def _save_backends_config(entries: list[dict]) -> None:
+    raw = _validated_backend_settings({"GRID_BACKENDS": json.dumps(entries, separators=(",", ":"))})["GRID_BACKENDS"]
+    if error := _enrolled_settings_error({"GRID_BACKENDS": raw}):
+        raise SettingsValidationError(error)
+    write_env({"GRID_BACKENDS": raw})
+    reload_settings({"GRID_BACKENDS": raw})
+
+
+async def _available_models() -> list[dict]:
+    """Models the configured Ollama endpoint(s) could serve, deduplicated."""
+    import httpx
+    urls = {Settings.OLLAMA_URL}
+    urls.update(e["url"] for e in _backends_config() if e["type"] == "ollama")
+    out, seen = [], set()
+    for url in sorted(u for u in urls if u):
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                r = await client.get(f"{url.rstrip('/')}/api/tags")
+            for m in (r.json().get("models") or []):
+                name = m.get("name")
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append({"model": name, "url": url})
+        except Exception:
+            continue  # endpoint down — roster still renders, just no additions
+    return out
+
+
+@app.get("/api/backends")
+async def api_backends():
+    """Roster + what else the local backend could serve (for the Add flow)."""
+    configured = _backend_rows()
+    serving = {row["model"] for row in configured}
+    available = [m for m in await _available_models() if m["model"] not in serving]
+    return {"configured": configured, "available": available}
+
+
+@app.post("/api/backends/add")
+async def api_backends_add(request: Request):
+    """Add a model to the roster and restart connections to serve it."""
+    if Settings.GRID_ENROLLED_WORKER_NAME:
+        return JSONResponse({"ok": False, "error": "Adding models requires an advanced account key; this rig is enrolled for one connection"}, status_code=409)
+    try:
+        body = await request.json()
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid backend payload"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Invalid backend payload"}, status_code=400)
+    model = str(body.get("model") or "").strip()
+    if not model:
+        return JSONResponse({"ok": False, "error": "Model is required"}, status_code=400)
+
+    entries = _backends_config()
+    if any(e["model"] == model and e["url"] == str(body.get("url") or Settings.OLLAMA_URL) for e in entries):
+        return JSONResponse({"ok": False, "error": "That model is already on the roster"}, status_code=409)
+
+    backend_type = str(body.get("type") or "ollama").lower()
+    url = str(body.get("url") or (Settings.OLLAMA_URL if backend_type == "ollama" else Settings.OPENAI_URL)).strip()
+    try:
+        url = validated_backend_url(url)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid backend URL"}, status_code=400)
+
+    entry = {
+        "type": backend_type,
+        "url": url,
+        "model": model,
+        "grid_model": str(body.get("grid_model") or model).strip(),
+        "concurrency": body.get("concurrency", 1),
+    }
+    max_context = body.get("max_context")
+    if max_context:
+        entry["max_context"] = max_context
+    if body.get("name"):
+        entry["name"] = body["name"]
+    if body.get("api_key"):
+        entry["api_key"] = str(body["api_key"])
+    entries.append(entry)
+    try:
+        _save_backends_config(entries)
+    except SettingsValidationError as exc:
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
+
+    # The supervisor builds its roster at start, so adding requires a restart.
+    # This drops the other models' connections for a few seconds; the grid
+    # requeues anything in flight.
+    await stop_worker()
+    await start_worker()
+    logger.info(f"Backend roster: added {model}; worker restarted")
+    return {"ok": True}
+
+
+@app.post("/api/backends/remove")
+async def api_backends_remove(request: Request):
+    """Drop a roster entry and restart without it."""
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    entries = _backends_config()
+    kept = [e for e in entries if e.get("name") != name]
+    if len(kept) == len(entries):
+        return JSONResponse({"ok": False, "error": "No such backend"}, status_code=404)
+    if not kept:
+        return JSONResponse({"ok": False, "error": "The roster cannot be emptied; pause the model instead"}, status_code=400)
+    try:
+        _save_backends_config(kept)
+    except SettingsValidationError as exc:
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
+    await stop_worker()
+    await start_worker()
+    logger.info(f"Backend roster: removed {name}; worker restarted")
+    return {"ok": True}
+
+
+@app.post("/api/backends/pause")
+async def api_backends_pause(request: Request):
+    """Pause or resume one backend without touching the others.
+
+    Flips the live spec (supervisor reacts within its 30s pass) and persists
+    the flag so a process restart keeps the operator's choice.
+    """
+    from ..ws_client import LIVE_BACKENDS
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    paused = body.get("paused")
+    if not isinstance(paused, bool):
+        return JSONResponse({"ok": False, "error": "Paused must be true or false"}, status_code=400)
+
+    entries = _backends_config()
+    hit = next((e for e in entries if e.get("name") == name), None)
+    if hit is None:
+        return JSONResponse({"ok": False, "error": "No such backend"}, status_code=404)
+    if paused:
+        hit["paused"] = True
+    else:
+        hit.pop("paused", None)
+    try:
+        _save_backends_config(entries)
+    except SettingsValidationError as exc:
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
+
+    live = LIVE_BACKENDS.get(name)
+    if live is not None:
+        live.paused = paused
+    logger.info(f"Backend {name} {'paused' if paused else 'resumed'}")
+    return {"ok": True, "applies_within_seconds": 30}
 
 
 @app.post("/api/grid-canary")
@@ -714,14 +1045,22 @@ async def api_grid_stats():
             if r.status_code == 200:
                 workers_payload = r.json()
                 workers = workers_payload.get("workers", [])
-                result["worker"] = next(
-                    (
-                        worker
-                        for worker in workers
-                        if worker.get("name", "").startswith(Settings.GRID_WORKER_NAME)
-                    ),
-                    None,
-                )
+                mine = [
+                    worker
+                    for worker in workers
+                    if worker.get("name", "").startswith(Settings.GRID_WORKER_NAME)
+                ]
+                if mine:
+                    models: set = set()
+                    for worker in mine:
+                        models.update(worker.get("models") or [])
+                    result["worker"] = {
+                        "name": Settings.GRID_WORKER_NAME,
+                        "online": any(worker.get("online") for worker in mine),
+                        "den_earned": sum(float(worker.get("den_earned") or 0) for worker in mine),
+                        "jobs_completed": sum(int(worker.get("jobs_completed") or worker.get("requests_fulfilled") or 0) for worker in mine),
+                        "models": sorted(models),
+                    }
                 result["performance"] = {
                     "text_worker_count": sum(
                         "text" in (worker.get("job_types") or ["text"])

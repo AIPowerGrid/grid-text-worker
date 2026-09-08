@@ -59,6 +59,12 @@ def reload_settings(config: dict):
         if env_key in config and (config[env_key] or env_key == "GRID_SCHEDULE"):
             setattr(Settings, attr, config[env_key])
 
+    # GRID_BACKENDS is read by load_backends() from the process environment, so
+    # a saved change must land there too — otherwise an in-app worker restart
+    # keeps serving the roster snapshotted at process start. Empty = clear.
+    if "GRID_BACKENDS" in config:
+        os.environ["GRID_BACKENDS"] = config["GRID_BACKENDS"] or ""
+
     if "GRID_NSFW" in config:
         Settings.NSFW = str(config["GRID_NSFW"]).lower() == "true"
     if "GRID_MAX_THREADS" in config:

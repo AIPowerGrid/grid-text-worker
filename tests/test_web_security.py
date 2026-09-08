@@ -1,5 +1,6 @@
 """Management-plane authentication, onboarding, and persistence boundaries."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -62,7 +63,7 @@ def test_backend_settings_reject_metadata_target():
         {"GRID_NSFW": "maybe"},
         {"GRID_MAX_THREADS": "17"},
         {"GRID_MAX_LENGTH": "not-a-number"},
-        {"GRID_MAX_CONTEXT_LENGTH": "131073"},
+        {"GRID_MAX_CONTEXT_LENGTH": "1048577"},
     ],
 )
 def test_backend_settings_reject_unsupported_or_malformed_values(settings):
@@ -436,3 +437,89 @@ def test_dashboard_link_copy_is_explicit_and_local():
         ("append", "http://localhost:7861?token=secret"),
         ("update", None),
     ]
+
+
+def test_backend_settings_accept_real_model_context_windows():
+    """qwen3 ships a 262,144-token window; the ceiling must follow real models."""
+    form = _validated_backend_settings(
+        {
+            "GRID_BACKENDS": json.dumps(
+                [
+                    {
+                        "type": "ollama",
+                        "url": "http://127.0.0.1:11434",
+                        "model": "qwen3:8b",
+                        "grid_model": "qwen3:8b",
+                        "concurrency": 1,
+                        "max_context": 262144,
+                    }
+                ]
+            )
+        }
+    )
+    assert json.loads(form["GRID_BACKENDS"])[0]["max_context"] == 262144
+
+
+def test_setup_complete_reports_why_it_rejected(dashboard_client):
+    """A rejected deploy must name the field, not say 'Invalid backend settings'."""
+    response = dashboard_client.post(
+        "/api/setup/complete",
+        headers={"Authorization": "Bearer dashboard-test-token"},
+        json={
+            "GRID_WORKER_NAME": "w",
+            "MODEL_NAME": "m",
+            "GRID_BACKENDS": json.dumps(
+                [{"type": "ollama", "model": "a", "concurrency": 99}]
+            ),
+        },
+    )
+    assert response.status_code == 400
+    assert "concurrency" in response.json()["error"].lower()
+
+
+def test_settings_save_preserves_per_backend_api_keys(dashboard_client, monkeypatch, tmp_path):
+    """The page never receives stored backend keys, so a roster it sends back
+    must not silently wipe them."""
+    import os
+    from inference_worker.web import routes as routes_mod
+
+    stored = [{
+        "type": "openai", "url": "http://127.0.0.1:8000/v1", "model": "m1",
+        "grid_model": "m1", "concurrency": 1, "api_key": "sk-secret",
+    }]
+    monkeypatch.setattr(routes_mod, "_backends_config", lambda: stored)
+
+    captured = {}
+    monkeypatch.setattr(routes_mod, "write_env", lambda form, **kw: captured.update(form))
+    monkeypatch.setattr(routes_mod, "reload_settings", lambda form: None)
+
+    incoming = json.dumps([{
+        "type": "openai", "url": "http://127.0.0.1:8000/v1", "model": "m1",
+        "grid_model": "m1", "concurrency": 1,
+    }])
+    response = dashboard_client.post(
+        "/api/settings",
+        headers={"Authorization": "Bearer dashboard-test-token"},
+        json={"GRID_BACKENDS": incoming},
+    )
+    assert response.status_code == 200
+    saved = json.loads(captured["GRID_BACKENDS"])
+    assert saved[0]["api_key"] == "sk-secret"
+
+
+def test_stray_value_errors_return_a_generic_message(dashboard_client, monkeypatch):
+    """Only SettingsValidationError messages are echoed; a stray ValueError
+    from a future unwrapped library call must not leak into the response."""
+    from inference_worker.web import routes as routes_mod
+
+    def explode(value):
+        raise ValueError("invalid literal for int() with base 10: 'secret-input'")
+
+    monkeypatch.setattr(routes_mod, "_validated_backend_settings", explode)
+    response = dashboard_client.post(
+        "/api/settings",
+        headers={"Authorization": "Bearer dashboard-test-token"},
+        json={"GRID_MAX_THREADS": "boom"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid backend settings"
