@@ -42,7 +42,7 @@ charging, den accounting, and payout settlement are unchanged from v0.3.8.
   built all four platforms, checked frozen runtime dependencies, and assembled
   verified checksums, manifest, SBOM, and GitHub provenance attestations.
 - The exact tagged Linux x64 binary ran on Ubuntu 24.04 against real local
-  Ollama Qwen 3 1.7B. Its authenticated dashboard displayed authoritative Core
+  Ollama Qwen 3 1.7B. Its authenticated dashboard API returned authoritative Core
   self-status and redacted account payout status. The hard-targeted setup check
   passed in 10,971 ms with exact output and no economic effect.
 - Core `d139835324fe9b05820b1ada1984fea0bb9fb538` is deployed. It includes
