@@ -30,6 +30,7 @@ _PERSISTED_BACKEND_SETTINGS = frozenset(
     {
         "BACKEND_TYPE",
         "GRID_API_KEY",
+        "GRID_BACKENDS",
         "GRID_MAX_CONTEXT_LENGTH",
         "GRID_MAX_LENGTH",
         "GRID_MAX_THREADS",
@@ -125,6 +126,8 @@ def _validated_backend_settings(value: object) -> dict:
             form[key] = validated_backend_url(form[key])
     if "GRID_SCHEDULE" in form:
         form["GRID_SCHEDULE"] = _validated_schedule(form["GRID_SCHEDULE"])
+    if "GRID_BACKENDS" in form:
+        form["GRID_BACKENDS"] = _validated_backends_json(form["GRID_BACKENDS"])
     if "BACKEND_TYPE" in form and form["BACKEND_TYPE"] not in {"ollama", "openai"}:
         raise ValueError("Unsupported backend type")
     if "GRID_NSFW" in form and form["GRID_NSFW"].lower() not in {"true", "false"}:
@@ -132,7 +135,7 @@ def _validated_backend_settings(value: object) -> dict:
     for key, lower, upper in (
         ("GRID_MAX_THREADS", 1, 16),
         ("GRID_MAX_LENGTH", 64, 32768),
-        ("GRID_MAX_CONTEXT_LENGTH", 256, 131072),
+        ("GRID_MAX_CONTEXT_LENGTH", 256, 1048576),
     ):
         if key not in form or not form[key]:
             continue
@@ -185,6 +188,42 @@ def _validated_schedule(value: object) -> str:
     return json.dumps(windows, separators=(",", ":"))
 
 
+def _validated_backends_json(value: object) -> str:
+    """Validate and canonicalize the multi-model roster JSON."""
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or len(value) > 16384:
+        raise ValueError("Backends must be JSON text")
+    try:
+        entries = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Backends must be valid JSON") from exc
+    if not isinstance(entries, list) or not entries or len(entries) > 16:
+        raise ValueError("Backends must be a list of 1-16 entries")
+    allowed = {"name", "type", "url", "api_key", "model", "grid_model", "concurrency", "schedule", "paused", "max_context"}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("Each backend must be an object")
+        if set(entry) - allowed:
+            raise ValueError("Backend entry contains an unknown field")
+        if not str(entry.get("model") or "").strip():
+            raise ValueError("Each backend needs a model")
+        if str(entry.get("type", "ollama")).lower() not in {"ollama", "openai"}:
+            raise ValueError("Unsupported backend type")
+        if entry.get("url"):
+            entry["url"] = validated_backend_url(str(entry["url"]))
+        concurrency = entry.get("concurrency", 1)
+        if isinstance(concurrency, bool) or not isinstance(concurrency, int) or not 1 <= concurrency <= 16:
+            raise ValueError("Backend concurrency must be an integer from 1 to 16")
+        if entry.get("schedule"):
+            entry["schedule"] = _validated_schedule(entry["schedule"])
+        if "max_context" in entry and entry["max_context"]:
+            ctx = entry["max_context"]
+            if isinstance(ctx, bool) or not isinstance(ctx, int) or not 256 <= ctx <= 1048576:
+                raise ValueError("Backend max_context must be an integer from 256 to 1048576")
+    return json.dumps(entries, separators=(",", ":"))
+
+
 def _enrolled_settings_error(form: dict) -> str | None:
     """Keep exact-name Console credentials within their issued capability."""
     enrolled_name = Settings.GRID_ENROLLED_WORKER_NAME
@@ -217,6 +256,7 @@ async def setup_guard(request: Request, call_next):
         or path.startswith("/api/")
         or path.startswith("/setup")
         or path == "/login"
+        or path == "/logs"
     ):
         return await call_next(request)
     if not worker_state["setup_complete"]:
@@ -372,7 +412,7 @@ async def api_test_model(request: Request):
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 256,
+        "max_tokens": 600,
         "temperature": 0.2,
     }
     if engine == "ollama":
@@ -441,8 +481,8 @@ async def api_complete_setup(request: Request):
     """Save config and start the worker."""
     try:
         form = _validated_backend_settings(await request.json())
-    except ValueError:
-        return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     if error := _enrolled_settings_error(form):
         return JSONResponse({"ok": False, "error": error}, status_code=400)
 
@@ -511,6 +551,45 @@ async def dashboard(request: Request):
     })
 
 
+def _backend_rows() -> list[dict]:
+    """Per-backend live view: spec + the states of its connections.
+
+    Connection names are the backend name plus optional `#N` suffixes
+    (_connection_names), so prefix-matching on `name` or `name#` is exact.
+    """
+    from ..config import load_backends
+    from ..ws_client import LIVE_BACKENDS
+
+    active = worker_state["workers"] if worker_state["running"] else {}
+    rows = []
+    for spec in load_backends():
+        if not spec.model_name:
+            continue  # unconfigured scalar placeholder (pre-setup) — not a real backend
+        live = LIVE_BACKENDS.get(spec.name, spec)
+        conns = [
+            w for name, w in active.items()
+            if name == spec.name or name.startswith(f"{spec.name}#")
+        ]
+        jobs = sum(getattr(w, "_jobs_completed", 0) for w in conns)
+        den = sum(getattr(w, "_total_den", 0.0) for w in conns)
+        rows.append({
+            "name": spec.name,
+            "model": spec.model_name,
+            "grid_model": spec.grid_model_name,
+            "backend_type": spec.backend_type,
+            "url": spec.url,
+            "concurrency": spec.concurrency,
+            "max_context": spec.max_context,
+            "paused": bool(getattr(live, "paused", False)),
+            "connected": sum(1 for w in conns if w.connected),
+            "expected": 0 if getattr(live, "paused", False) else max(spec.concurrency, 0),
+            "connection_error": next((w.connection_error for w in conns if w.connection_error), None),
+            "jobs_completed": jobs,
+            "den_earned": den,
+        })
+    return rows
+
+
 @app.get("/api/status")
 async def api_status():
     workers = list(worker_state["workers"].values()) if worker_state["running"] else []
@@ -519,6 +598,7 @@ async def api_status():
     connection_error = next((w.connection_error for w in workers if w.connection_error), None)
 
     return {
+        "backends": _backend_rows(),
         "worker_running": worker_state["running"],
         "grid_connected": bool(expected) and connected == len(expected),
         "connected_workers": connected,
@@ -586,8 +666,8 @@ async def save_settings(request: Request):
     """Save settings to .env and update in-memory config."""
     try:
         form = _validated_backend_settings(await request.json())
-    except ValueError:
-        return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     if error := _enrolled_settings_error(form):
         return JSONResponse({"ok": False, "error": error}, status_code=400)
 
@@ -596,6 +676,22 @@ async def save_settings(request: Request):
     for secret_name in ("GRID_API_KEY", "OPENAI_API_KEY"):
         if not form.get(secret_name):
             form.pop(secret_name, None)
+
+    # The same rule for per-backend keys inside GRID_BACKENDS: the page never
+    # sees them, so entries coming back without one keep the stored key.
+    if form.get("GRID_BACKENDS"):
+        stored = {
+            (e.get("url"), e.get("model")): e.get("api_key")
+            for e in _backends_config()
+            if e.get("api_key")
+        }
+        entries = json.loads(form["GRID_BACKENDS"])
+        for entry in entries:
+            if not entry.get("api_key"):
+                kept = stored.get((entry.get("url"), entry.get("model")))
+                if kept:
+                    entry["api_key"] = kept
+        form["GRID_BACKENDS"] = json.dumps(entries, separators=(",", ":"))
 
     write_env(form, delete_empty=True)
     reload_settings(form)
@@ -610,6 +706,166 @@ async def restart_worker():
     await stop_worker()
     await start_worker()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Backends (multi-model roster)
+# ---------------------------------------------------------------------------
+def _backends_config() -> list[dict]:
+    """The effective roster as JSON-ready entries.
+
+    When GRID_BACKENDS is unset this materializes the classic single-backend
+    env vars, so the first roster edit converts a legacy config in place and
+    every entry is editable from then on.
+    """
+    from ..config import load_backends
+    entries = []
+    for b in load_backends():
+        if not b.model_name:
+            continue  # pre-setup placeholder
+        entry = {
+            "name": b.name,
+            "type": b.backend_type,
+            "url": b.url,
+            "model": b.model_name,
+            "grid_model": b.grid_model_name,
+            "concurrency": b.concurrency,
+        }
+        if b.max_context:
+            entry["max_context"] = b.max_context
+        if b.api_key:
+            entry["api_key"] = b.api_key
+        if b.schedule:
+            entry["schedule"] = b.schedule
+        if b.paused:
+            entry["paused"] = True
+        entries.append(entry)
+    return entries
+
+
+def _save_backends_config(entries: list[dict]) -> None:
+    raw = json.dumps(entries, separators=(",", ":"))
+    write_env({"GRID_BACKENDS": raw})
+    reload_settings({"GRID_BACKENDS": raw})
+
+
+async def _available_models() -> list[dict]:
+    """Models the configured Ollama endpoint(s) could serve, deduplicated."""
+    import httpx
+    urls = {Settings.OLLAMA_URL}
+    urls.update(e["url"] for e in _backends_config() if e["type"] == "ollama")
+    out, seen = [], set()
+    for url in sorted(u for u in urls if u):
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                r = await client.get(f"{url.rstrip('/')}/api/tags")
+            for m in (r.json().get("models") or []):
+                name = m.get("name")
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append({"model": name, "url": url})
+        except Exception:
+            continue  # endpoint down — roster still renders, just no additions
+    return out
+
+
+@app.get("/api/backends")
+async def api_backends():
+    """Roster + what else the local backend could serve (for the Add flow)."""
+    configured = _backend_rows()
+    serving = {row["model"] for row in configured}
+    available = [m for m in await _available_models() if m["model"] not in serving]
+    return {"configured": configured, "available": available}
+
+
+@app.post("/api/backends/add")
+async def api_backends_add(request: Request):
+    """Add a model to the roster and restart connections to serve it."""
+    body = await request.json()
+    model = str(body.get("model") or "").strip()
+    if not model:
+        return JSONResponse({"ok": False, "error": "Model is required"}, status_code=400)
+
+    entries = _backends_config()
+    if any(e["model"] == model and e["url"] == str(body.get("url") or Settings.OLLAMA_URL) for e in entries):
+        return JSONResponse({"ok": False, "error": "That model is already on the roster"}, status_code=409)
+
+    backend_type = str(body.get("type") or "ollama").lower()
+    url = str(body.get("url") or (Settings.OLLAMA_URL if backend_type == "ollama" else Settings.OPENAI_URL)).strip()
+    try:
+        url = validated_backend_url(url)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid backend URL"}, status_code=400)
+
+    entry = {
+        "type": backend_type,
+        "url": url,
+        "model": model,
+        "grid_model": str(body.get("grid_model") or model).strip(),
+        "concurrency": max(1, min(int(body.get("concurrency") or 1), 16)),
+    }
+    max_context = body.get("max_context")
+    if max_context:
+        entry["max_context"] = max(256, min(int(max_context), 1048576))
+    if body.get("api_key"):
+        entry["api_key"] = str(body["api_key"])
+    entries.append(entry)
+    _save_backends_config(entries)
+
+    # The supervisor builds its roster at start, so adding requires a restart.
+    # This drops the other models' connections for a few seconds; the grid
+    # requeues anything in flight.
+    await stop_worker()
+    await start_worker()
+    logger.info(f"Backend roster: added {model}; worker restarted")
+    return {"ok": True}
+
+
+@app.post("/api/backends/remove")
+async def api_backends_remove(request: Request):
+    """Drop a roster entry and restart without it."""
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    entries = _backends_config()
+    kept = [e for e in entries if e.get("name") != name]
+    if len(kept) == len(entries):
+        return JSONResponse({"ok": False, "error": "No such backend"}, status_code=404)
+    if not kept:
+        return JSONResponse({"ok": False, "error": "The roster cannot be emptied; pause the model instead"}, status_code=400)
+    _save_backends_config(kept)
+    await stop_worker()
+    await start_worker()
+    logger.info(f"Backend roster: removed {name}; worker restarted")
+    return {"ok": True}
+
+
+@app.post("/api/backends/pause")
+async def api_backends_pause(request: Request):
+    """Pause or resume one backend without touching the others.
+
+    Flips the live spec (supervisor reacts within its 30s pass) and persists
+    the flag so a process restart keeps the operator's choice.
+    """
+    from ..ws_client import LIVE_BACKENDS
+    body = await request.json()
+    name = str(body.get("name") or "").strip()
+    paused = bool(body.get("paused"))
+
+    entries = _backends_config()
+    hit = next((e for e in entries if e.get("name") == name), None)
+    if hit is None:
+        return JSONResponse({"ok": False, "error": "No such backend"}, status_code=404)
+    if paused:
+        hit["paused"] = True
+    else:
+        hit.pop("paused", None)
+    _save_backends_config(entries)
+
+    live = LIVE_BACKENDS.get(name)
+    if live is not None:
+        live.paused = paused
+    logger.info(f"Backend {name} {'paused' if paused else 'resumed'}")
+    return {"ok": True, "applies_within_seconds": 30}
 
 
 @app.post("/api/grid-canary")
@@ -714,14 +970,22 @@ async def api_grid_stats():
             if r.status_code == 200:
                 workers_payload = r.json()
                 workers = workers_payload.get("workers", [])
-                result["worker"] = next(
-                    (
-                        worker
-                        for worker in workers
-                        if worker.get("name", "").startswith(Settings.GRID_WORKER_NAME)
-                    ),
-                    None,
-                )
+                mine = [
+                    worker
+                    for worker in workers
+                    if worker.get("name", "").startswith(Settings.GRID_WORKER_NAME)
+                ]
+                if mine:
+                    models: set = set()
+                    for worker in mine:
+                        models.update(worker.get("models") or [])
+                    result["worker"] = {
+                        "name": Settings.GRID_WORKER_NAME,
+                        "online": any(worker.get("online") for worker in mine),
+                        "den_earned": sum(float(worker.get("den_earned") or 0) for worker in mine),
+                        "jobs_completed": sum(int(worker.get("jobs_completed") or worker.get("requests_fulfilled") or 0) for worker in mine),
+                        "models": sorted(models),
+                    }
                 result["performance"] = {
                     "text_worker_count": sum(
                         "text" in (worker.get("job_types") or ["text"])
