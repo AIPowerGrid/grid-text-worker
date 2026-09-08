@@ -6,10 +6,9 @@
 {% block main_class %}form-main{% endblock %}
 
 {% block content %}
-<div x-data="settingsForm()">
+<div x-data="settingsForm()" x-init="init()">
   <form @submit.prevent="save()" class="settings-form">
     <div class="settings-grid">
-    <div>
     <div class="card">
       <h2>Grid API</h2>
       <template x-if="enrolledWorkerName">
@@ -33,7 +32,7 @@
       <template x-if="!enrolledWorkerName">
         <label class="field">
           <span class="field-label">API Key</span>
-          <input type="password" x-model="form.GRID_API_KEY"
+          <input type="password" autocomplete="off" data-1p-ignore x-model="form.GRID_API_KEY"
                  :placeholder="hasGridApiKey ? 'Configured — enter a replacement' : 'grid_...'">
           <div class="field-hint">The stored key is never returned to this page. <a href="https://console.aipowergrid.io/dashboard/api-key" target="_blank" rel="noopener">Manage keys in Console</a>.</div>
         </label>
@@ -48,26 +47,27 @@
     <div class="card">
       <h2>Backend</h2>
       <label class="field">
-        <span class="field-label">Backend Type</span>
+        <span class="field-label">Engine</span>
         <select x-model="form.BACKEND_TYPE">
           <option value="ollama">Ollama</option>
-          <option value="openai">OpenAI-compatible (vLLM, SGLang, etc.)</option>
+          <option value="openai">OpenAI-compatible (vLLM, SGLang, LM Studio, hosted)</option>
         </select>
+        <div class="field-hint">Setup detects this from the endpoint; change it only if you point at a different engine here.</div>
       </label>
       <label class="field" x-show="form.BACKEND_TYPE === 'ollama'" style="margin-bottom: 0;">
-        <span class="field-label">Ollama URL</span>
+        <span class="field-label">Backend endpoint</span>
         <input type="text" x-model="form.OLLAMA_URL" placeholder="http://127.0.0.1:11434">
       </label>
       <template x-if="form.BACKEND_TYPE === 'openai'">
         <div>
           <label class="field">
-            <span class="field-label">OpenAI-compatible URL</span>
+            <span class="field-label">Backend endpoint</span>
             <input type="text" x-model="form.OPENAI_URL" placeholder="http://127.0.0.1:8000/v1">
           </label>
           <label class="field" style="margin-bottom: 0;">
-            <span class="field-label">API Key <span class="optional">(if required)</span></span>
-            <input type="password" x-model="form.OPENAI_API_KEY"
-                   :placeholder="hasOpenAiApiKey ? 'Configured — enter a replacement' : ''">
+            <span class="field-label">API Key <span class="optional">(optional)</span></span>
+            <input type="password" autocomplete="off" data-1p-ignore x-model="form.OPENAI_API_KEY"
+                   :placeholder="hasOpenAiApiKey ? 'Configured — enter a replacement' : 'sk-...'">
             <div class="field-hint" x-show="hasOpenAiApiKey">The stored backend key is not returned to this page.</div>
           </label>
         </div>
@@ -75,38 +75,91 @@
     </div>
 
     <div class="card">
-      <h2>Model</h2>
-      <label class="field">
-        <span class="field-label">Model Name</span>
-        <input type="text" x-model="form.MODEL_NAME" placeholder="e.g. llama3.2:3b">
-        <div class="field-hint">The model your backend is serving.</div>
-      </label>
-      <label class="field" style="margin-bottom: 0;">
-        <span class="field-label">Grid Model Name <span class="optional">(what to advertise)</span></span>
-        <input type="text" x-model="form.GRID_MODEL_NAME" placeholder="e.g. grid/llama3.2:3b">
-        <div class="field-hint">Leave blank to auto-generate from model name.</div>
-      </label>
+      <h2>Models</h2>
+      <template x-if="backends.length > 0">
+        <div class="model-roster">
+          <template x-for="b in backends" :key="b.name">
+            <div class="model-card">
+              <div class="model-card-head" style="cursor: default;">
+                <span class="status-dot" :class="b.paused ? 'paused' : (b.connected > 0 ? 'online' : 'error')"
+                      style="display:inline-block;width:9px;height:9px;border-radius:50%;flex-shrink:0;"></span>
+                <span class="model-card-name" x-text="b.model"></span>
+                <span class="model-card-grid" x-text="b.grid_model"></span>
+              </div>
+              <div class="model-card-ctx">
+                <span class="model-card-ctx-label">Context</span>
+                <input type="range" class="model-card-slider" min="2048" :max="ctxMax(b)" step="1024"
+                       x-model.number="b.max_context">
+                <span class="model-card-ctx-value"
+                      x-text="Number(b.max_context || 0).toLocaleString() + ' ctx'"></span>
+              </div>
+            </div>
+          </template>
+          <div class="field-hint-slot">
+            <span x-show="backends.length > 1">Several models share one GPU — smaller contexts keep them resident instead of swapping per job.</span>
+            <span x-show="backends.length <= 1">Add, pause, or remove models from the dashboard.</span>
+          </div>
+        </div>
+      </template>
+      <template x-if="backends.length === 0">
+        <div>
+          <label class="field">
+            <span class="field-label">Model</span>
+            <input type="text" x-model="form.MODEL_NAME" placeholder="e.g. llama3.2:3b">
+            <div class="field-hint">The model your backend is serving.</div>
+          </label>
+          <label class="field" style="margin-bottom: 0;">
+            <span class="field-label">Model name on the Grid</span>
+            <input type="text" x-model="form.GRID_MODEL_NAME" :placeholder="form.MODEL_NAME || 'llama3.2:3b'">
+            <div class="field-hint">Leave blank to use the model name.</div>
+          </label>
+        </div>
+      </template>
     </div>
 
-    </div>
-    <div>
     <div class="card">
       <h2>Limits</h2>
       <label class="field">
-        <span class="field-label">Max Threads</span>
+        <span class="field-label">Simultaneous jobs</span>
         <input type="number" x-model="form.GRID_MAX_THREADS" min="1"
                :max="enrolledWorkerName ? 1 : 16" :disabled="Boolean(enrolledWorkerName)">
-        <div class="field-hint" x-show="enrolledWorkerName">Worker-only credentials are bound to one exact connection. Parallel operators use an advanced account key.</div>
+        <div class="field-hint" x-show="enrolledWorkerName">A Console-enrolled credential is bound to one connection. Switch to an API key for parallel slots.</div>
       </label>
+
+      <div class="field">
+        <div class="sched-head">
+          <span class="field-label" style="margin-bottom: 0;">Operating schedule</span>
+          <span class="sched-summary" x-text="scheduleSummary()"></span>
+        </div>
+        <div class="sched-days">
+          <template x-for="day in sched.day_list" :key="day">
+            <button type="button" class="sched-day" :class="sched.days.includes(day) ? 'on' : ''"
+                    @click="toggleDay(day)" x-text="day.charAt(0).toUpperCase() + day.slice(1)"></button>
+          </template>
+        </div>
+        <div class="sched-times">
+          <label class="sched-time">
+            <span>From</span>
+            <input type="time" x-model="sched.start">
+          </label>
+          <label class="sched-time">
+            <span>To</span>
+            <input type="time" x-model="sched.end">
+          </label>
+          <label class="sched-time">
+            <span>Jobs in window</span>
+            <input type="number" x-model.number="sched.concurrency"
+                   :min="0" :max="enrolledWorkerName ? 1 : 16">
+          </label>
+        </div>
+        <div class="field-hint-slot">
+          <span x-show="sched.concurrency === 0">0 pauses the worker inside this window; outside it, Simultaneous jobs applies.</span>
+          <span x-show="sched.concurrency !== 0 && !scheduleIsDefault()">Inside this window this replaces Simultaneous jobs; outside it, Simultaneous jobs applies.</span>
+        </div>
+      </div>
+
       <label class="field">
-        <span class="field-label">Operating Schedule <span class="optional">(optional, local time)</span></span>
-        <textarea x-model="form.GRID_SCHEDULE" rows="5"
-                  placeholder='[{"days":"mon-fri","start":"18:00","end":"23:59","concurrency":0}]'></textarea>
-        <div class="field-hint">JSON windows override concurrency while active. Use concurrency 0 for a pause window. Outside all windows, Max Threads applies.</div>
-        <div class="field-hint" x-show="enrolledWorkerName">This worker-only credential permits scheduled concurrency 0 or 1.</div>
-      </label>
-      <label class="field">
-        <span class="field-label">Max Length (tokens)</span>
+        <span class="field-label">Max response (tokens)</span>
         <div style="display: flex; align-items: center; gap: 0.75rem;">
           <input type="range" x-model="form.GRID_MAX_LENGTH" min="64" max="32768" step="64"
                  style="flex: 1; accent-color: var(--accent);">
@@ -114,10 +167,10 @@
                 x-text="form.GRID_MAX_LENGTH"></span>
         </div>
       </label>
-      <label class="field">
-        <span class="field-label">Max Context Length (tokens)</span>
+      <label class="field" x-show="backends.length === 0">
+        <span class="field-label">Max context (tokens)</span>
         <div style="display: flex; align-items: center; gap: 0.75rem;">
-          <input type="range" x-model="form.GRID_MAX_CONTEXT_LENGTH" min="256" max="131072" step="256"
+          <input type="range" x-model="form.GRID_MAX_CONTEXT_LENGTH" min="256" max="262144" step="256"
                  style="flex: 1; accent-color: var(--accent);">
           <span style="min-width: 4.5rem; text-align: right; font-size: 0.85rem; font-family: monospace; color: var(--text);"
                 x-text="Number(form.GRID_MAX_CONTEXT_LENGTH).toLocaleString()"></span>
@@ -129,28 +182,29 @@
       </label>
     </div>
 
-    <div class="card wallet-card">
-      <div class="wallet-header">
-        <h2>Wallet</h2>
+    <div class="card">
+      <h2>Reward wallet</h2>
+      <div class="wallet-row">
         <span class="chain-badge">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#0000FF"/><path d="M8.5 4V20H11C17 20 17 8 11 8H8.5Z" fill="#fff"/></svg>
           Base
         </span>
-      </div>
-      <div class="wallet-body">
-        <p class="field-hint">Payouts use the Grid account that approved this worker or owns its advanced API key.</p>
-        <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">Manage payout wallet</a>
+        <a class="btn btn-sm btn-outline" href="https://console.aipowergrid.io/dashboard/settings" target="_blank" rel="noopener">
+          Manage payout wallet
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+        </a>
       </div>
     </div>
 
-    <div class="form-actions" style="justify-content: flex-start;">
+    </div>
+
+    <div class="form-actions">
       <button type="submit" class="btn btn-primary" :disabled="saving">
         <span x-show="!saving">Save Settings</span>
         <span x-show="saving">Saving...</span>
       </button>
       <span x-show="saved" class="save-ok" x-transition>Saved. Restart worker to apply.</span>
-    </div>
-    </div>
+      <span x-show="saveError" style="color: var(--red); font-size: 0.82rem;" x-text="saveError"></span>
     </div>
   </form>
 </div>
@@ -160,10 +214,19 @@ function settingsForm() {
   return {
     saving: false,
     saved: false,
+    saveError: '',
     hasGridApiKey: {{ settings.HAS_GRID_API_KEY | tojson }},
     hasOpenAiApiKey: {{ settings.HAS_OPENAI_API_KEY | tojson }},
     enrolledWorkerName: {{ settings.GRID_ENROLLED_WORKER_NAME | tojson }},
     enrollment: { status: 'idle', busy: false, error: '', authorize_url: '' },
+    backends: [],
+    sched: {
+      day_list: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+      days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+      start: '00:00',
+      end: '23:59',
+      concurrency: 1,
+    },
     form: {
       GRID_API_KEY: '',
       GRID_WORKER_NAME: {{ settings.GRID_WORKER_NAME | tojson }},
@@ -179,6 +242,104 @@ function settingsForm() {
       GRID_MAX_LENGTH: {{ settings.GRID_MAX_LENGTH | tojson }},
       GRID_MAX_CONTEXT_LENGTH: {{ settings.GRID_MAX_CONTEXT_LENGTH | tojson }},
     },
+    init() {
+      this.hydrateSchedule();
+      this.loadBackends();
+    },
+
+    ctxMax(b) {
+      // The model's detected window is the honest ceiling; before detection
+      // lands, don't offer more than the current value.
+      return b.window || Math.max(Number(b.max_context) || 2048, 2048);
+    },
+
+    async loadBackends() {
+      try {
+        const r = await fetch('/api/backends');
+        const d = await r.json();
+        this.backends = d.configured || [];
+        for (const b of this.backends) this.fetchWindow(b);
+      } catch (e) { /* roster stays empty; the scalar fields still render */ }
+    },
+
+    async fetchWindow(b) {
+      try {
+        const r = await fetch('/api/setup/context-length', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: b.url, engine: b.backend_type, model: b.model }),
+        });
+        const d = await r.json();
+        if (d.context_length) b.window = d.context_length;
+      } catch (e) { /* slider keeps its conservative ceiling */ }
+    },
+
+    // The stored value is the grid's JSON window format; the builder is just a
+    // friendlier editor over the same thing.
+    hydrateSchedule() {
+      this.sched.concurrency = Math.max(1, parseInt(this.form.GRID_MAX_THREADS) || 1);
+      const raw = (this.form.GRID_SCHEDULE || '').trim();
+      if (!raw) return;
+      try {
+        const windows = JSON.parse(raw);
+        const w = Array.isArray(windows) ? windows[0] : null;
+        if (!w) return;
+        const days = String(w.days || '').toLowerCase();
+        if (days && !['*', 'all', 'daily'].includes(days)) {
+          const wanted = new Set();
+          for (const part of days.split(',')) {
+            const bounds = part.split('-').map(x => x.trim());
+            if (bounds.length === 2) {
+              const a = this.sched.day_list.indexOf(bounds[0]);
+              const b = this.sched.day_list.indexOf(bounds[1]);
+              if (a !== -1 && b !== -1) {
+                for (let i = a; i <= b; i++) wanted.add(this.sched.day_list[i]);
+              }
+            } else if (this.sched.day_list.includes(bounds[0])) {
+              wanted.add(bounds[0]);
+            }
+          }
+          if (wanted.size) this.sched.days = this.sched.day_list.filter(d => wanted.has(d));
+        }
+        if (w.start) this.sched.start = w.start;
+        if (w.end) this.sched.end = w.end;
+        if (w.concurrency !== undefined) this.sched.concurrency = Number(w.concurrency);
+      } catch (e) { /* unparsable stored value: leave the builder at defaults */ }
+    },
+
+    toggleDay(day) {
+      const days = this.sched.days;
+      const i = days.indexOf(day);
+      if (i === -1) days.push(day); else days.splice(i, 1);
+    },
+
+    scheduleIsDefault() {
+      return this.sched.days.length === 7 &&
+             this.sched.start === '00:00' && this.sched.end === '23:59' &&
+             Number(this.sched.concurrency) === Number(this.form.GRID_MAX_THREADS || 1);
+    },
+
+    scheduleSummary() {
+      if (this.sched.days.length === 0) return 'No days selected — worker stays off';
+      if (this.scheduleIsDefault()) return 'Always on';
+      const days = this.sched.days.length === 7 ? 'Every day' : this.sched.day_list
+        .filter(d => this.sched.days.includes(d))
+        .map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(' ');
+      const jobs = Number(this.sched.concurrency) === 0 ? 'paused' : this.sched.concurrency + ' job' + (Number(this.sched.concurrency) === 1 ? '' : 's');
+      return `${days} · ${this.sched.start}–${this.sched.end} · ${jobs}`;
+    },
+
+    scheduleJson() {
+      if (this.scheduleIsDefault() || this.sched.days.length === 0) return '';
+      const ordered = this.sched.day_list.filter(d => this.sched.days.includes(d));
+      return JSON.stringify([{
+        days: ordered.join(','),
+        start: this.sched.start,
+        end: this.sched.end,
+        concurrency: Number(this.sched.concurrency),
+      }]);
+    },
+
     async reconnectGridAccount() {
       this.enrollment = { status: 'pending', busy: true, error: '', authorize_url: '' };
       try {
@@ -221,13 +382,34 @@ function settingsForm() {
     async save() {
       this.saving = true;
       this.saved = false;
+      this.saveError = '';
       try {
+        // The builder is the source of truth for the schedule on this page.
+        const payload = { ...this.form, GRID_SCHEDULE: this.scheduleJson() };
+        if (this.backends.length > 0) {
+          payload.GRID_BACKENDS = JSON.stringify(this.backends.map(b => {
+            const entry = {
+              name: b.name, type: b.backend_type, url: b.url,
+              model: b.model, grid_model: b.grid_model,
+              concurrency: Number(b.concurrency) || 1,
+            };
+            if (b.max_context) entry.max_context = Number(b.max_context);
+            if (b.paused) entry.paused = true;
+            return entry;
+          }));
+        }
         const r = await fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.form),
+          body: JSON.stringify(payload),
         });
-        if (r.ok) this.saved = true;
+        const body = await r.json().catch(() => ({}));
+        if (r.ok && body.ok !== false) {
+          this.form.GRID_SCHEDULE = payload.GRID_SCHEDULE;
+          this.saved = true;
+        } else {
+          this.saveError = body.error || 'Could not save settings';
+        }
       } finally {
         this.saving = false;
       }
