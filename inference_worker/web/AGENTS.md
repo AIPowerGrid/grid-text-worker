@@ -41,7 +41,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
   persistence. Cloud metadata, link-local, multicast, reserved, credentialed,
   query-bearing, and malformed targets are forbidden.
 - Management APIs return stable error classes rather than raw exceptions or
-  backend bodies. Automatic remote-script installation is not part of this UI;
+  backend bodies. Settings validation exposes only explicitly authored public
+  messages; wrapped URL/library exceptions never become response text.
+  Automatic remote-script installation is not part of this UI;
   operators install Ollama through its reviewed platform installer.
 - Browser runtime dependencies are versioned local assets included in the frozen
   binary. Do not replace them with floating CDN URLs; update the vendored file,

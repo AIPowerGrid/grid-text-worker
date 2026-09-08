@@ -70,6 +70,23 @@ def save(client, entries, **values):
     )
 
 
+@pytest.mark.parametrize("path", ["/api/setup/complete", "/api/settings"])
+@pytest.mark.parametrize("roster", [True, False])
+def test_settings_do_not_reflect_url_library_errors(manager, monkeypatch, path, roster):
+    def reject_url(_url):
+        raise ValueError("private-library-detail-fixture")
+
+    monkeypatch.setattr(routes, "validated_backend_url", reject_url)
+    payload = (
+        {"GRID_BACKENDS": json.dumps([entry()])}
+        if roster
+        else {"OPENAI_URL": "http://127.0.0.1:8000/v1"}
+    )
+    response = manager.post(path, json=payload)
+    assert response.status_code == 400
+    assert response.json() == {"ok": False, "error": "Invalid backend URL"}
+
+
 def test_enrolled_roster_survives_save_and_registration(manager, monkeypatch):
     monkeypatch.setattr(Settings, "GRID_ENROLLED_WORKER_NAME", "test-rig")
     result = manager.post(

@@ -48,11 +48,11 @@ _SCHEDULE_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 
 class SettingsValidationError(ValueError):
-    """A validation failure whose message was authored for the operator.
+    """A validation failure with an explicitly authored public message."""
 
-    Endpoints echo str(exc) for THIS type only; any other exception gets a
-    generic message, so a stray library error can never leak internals into
-    an HTTP response (CodeQL py/stack-trace-exposure)."""
+    def __init__(self, public_message: str):
+        super().__init__(public_message)
+        self.public_message = public_message
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -134,7 +134,7 @@ def _validated_backend_settings(value: object) -> dict:
             try:
                 form[key] = validated_backend_url(form[key])
             except ValueError as exc:
-                raise SettingsValidationError(str(exc)) from exc
+                raise SettingsValidationError("Invalid backend URL") from exc
     if "GRID_SCHEDULE" in form:
         form["GRID_SCHEDULE"] = _validated_schedule(form["GRID_SCHEDULE"])
     if "GRID_BACKENDS" in form:
@@ -230,7 +230,7 @@ def _validated_backends_json(value: object) -> str:
             try:
                 entry["url"] = validated_backend_url(str(entry["url"]))
             except ValueError as exc:
-                raise SettingsValidationError(str(exc)) from exc
+                raise SettingsValidationError("Invalid backend URL") from exc
         concurrency = entry.get("concurrency", 1)
         if isinstance(concurrency, bool) or not isinstance(concurrency, int) or not 0 <= concurrency <= 16:
             raise SettingsValidationError("Backend concurrency must be an integer from 0 to 16")
@@ -526,7 +526,7 @@ async def api_complete_setup(request: Request):
     try:
         form = _validated_backend_settings(await request.json())
     except SettingsValidationError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
     if error := _enrolled_settings_error(form):
@@ -716,7 +716,7 @@ async def save_settings(request: Request):
     try:
         form = _validated_backend_settings(await request.json())
     except SettingsValidationError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
     except ValueError:
         return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
     if error := _enrolled_settings_error(form):
@@ -877,7 +877,7 @@ async def api_backends_add(request: Request):
     try:
         _save_backends_config(entries)
     except SettingsValidationError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
 
     # The supervisor builds its roster at start, so adding requires a restart.
     # This drops the other models' connections for a few seconds; the grid
@@ -902,7 +902,7 @@ async def api_backends_remove(request: Request):
     try:
         _save_backends_config(kept)
     except SettingsValidationError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
     await stop_worker()
     await start_worker()
     logger.info(f"Backend roster: removed {name}; worker restarted")
@@ -934,7 +934,7 @@ async def api_backends_pause(request: Request):
     try:
         _save_backends_config(entries)
     except SettingsValidationError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "error": exc.public_message}, status_code=400)
 
     live = LIVE_BACKENDS.get(name)
     if live is not None:
