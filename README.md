@@ -89,6 +89,22 @@ explicitly; normal startup logs never print the dashboard token.
 
 Once your worker is running, chat with your model at [aipg.chat](https://aipg.chat) — select your model in the upper selector.
 
+## Multi-model Candidate Settings
+
+The v0.3.9 candidate adds a model roster to setup and the dashboard. Console
+enrollment remains limited to one model/connection; multiple models require an
+advanced account key. Settings edits each roster entry's endpoint, engine,
+credential, and concurrency independently. Stored credentials are never shown
+and are not copied to a changed endpoint.
+
+`GRID_BACKENDS` entries may set `paused` (boolean), `max_context` (zero for
+detection, otherwise a ceiling on detected capacity), and `schedule` (JSON
+windows). An omitted schedule inherits `GRID_SCHEDULE`; an explicit empty one
+uses the entry's normal concurrency all week. No selected days means an explicit
+all-week pause. Custom multi-window schedules remain editable as JSON, and
+explicit `modalities`/`vision` declarations survive roster edits. Context limits
+advertised to Grid do not configure backend VRAM allocation.
+
 ## Help Validate the Grid
 
 Already run persistent infrastructure? AI Power Grid is recruiting two more

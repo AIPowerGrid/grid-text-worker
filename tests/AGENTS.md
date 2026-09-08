@@ -23,6 +23,9 @@ does not currently prove a live backend-to-Grid job lifecycle.
   preservation of validator protocol fields in structured backend requests.
 - `test_enrollment.py` - Console device enrollment, private pending-state
   persistence, delegation verification, and capability-bound registration.
+- `test_roster_regressions.py` - isolated settings persistence, exact-name
+  enrollment, schedule inheritance/overrides, cold config reload, capability
+  preservation, endpoint-bound secret retention, and detected-context caps.
 - `test_bundled_ca.py` - public CA inclusion checks for onefile and onedir
   layouts; requires the build extra. The release CI also checks actual binaries.
 - `onboarding-ui.test.mjs` - Node built-in tests of the actual template scripts:

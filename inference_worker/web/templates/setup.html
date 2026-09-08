@@ -143,9 +143,6 @@
                 </div>
               </template>
             </div>
-            <div class="field-hint-slot" x-show="selectedEntries().length > 1">
-              <span>Several models share one GPU. Keep contexts modest, and raise <code>OLLAMA_MAX_LOADED_MODELS</code> so they stay resident — otherwise every job waits for a model swap.</span>
-            </div>
           </div>
           <label class="field" x-show="model_entries.length === 0">
             <span class="field-label">Model</span>
@@ -693,7 +690,7 @@ function setupWizard() {
 
     scheduleJson() {
       if (this.scheduleIsDefault()) return '';
-      if (this.sched.days.length === 0) return '';
+      if (this.sched.days.length === 0) return JSON.stringify([{ concurrency: 0 }]);
       const ordered = this.sched.day_list.filter(d => this.sched.days.includes(d));
       return JSON.stringify([{
         days: ordered.join(','),
@@ -764,11 +761,8 @@ function setupWizard() {
       return this.selectedEntries().filter(e => this.enlistState(e.model) === 'ok').length;
     },
 
-    // A full window inflates each resident model several-fold (a 1.4 GB model
-    // at 40k ctx occupies ~6 GB), so several models can't stay loaded together
-    // and every job pays a reload. When more than one model is selected, clamp
-    // every UNTOUCHED slider to a shareable default — uniformly, so the first
-    // selection doesn't keep a different default than the rest.
+    // Bound advertised requests conservatively across a shared roster. Backend
+    // memory allocation is configured independently by the operator.
     applyContextDefaults() {
       const entries = this.selectedEntries();
       for (const e of entries) {
@@ -908,6 +902,10 @@ function setupWizard() {
       const wait = ms => new Promise(r => setTimeout(r, ms));
 
       try {
+        if (this.credential_mode === 'console' && this.selectedEntries().length > 1) {
+          this.deploy.error = 'Console enrollment supports one model. Select one model or use the Advanced account-key option.';
+          return;
+        }
         const isOllama = this.config.engine === 'ollama';
         const payload = {
           GRID_WORKER_NAME: this.config.worker_name.trim(),
@@ -928,7 +926,7 @@ function setupWizard() {
         if (this.config.max_context_length) payload.GRID_MAX_CONTEXT_LENGTH = this.config.max_context_length;
         if (this.config.max_threads) payload.GRID_MAX_THREADS = this.config.max_threads;
         const scheduleJson = this.scheduleJson();
-        if (scheduleJson) payload.GRID_SCHEDULE = scheduleJson;
+        payload.GRID_SCHEDULE = scheduleJson;
         if (this.config.backend_api_key) payload.OPENAI_API_KEY = this.config.backend_api_key;
 
         // Roster selections ship as GRID_BACKENDS: every chosen model becomes
@@ -945,6 +943,7 @@ function setupWizard() {
               grid_model: (e.grid_model || e.model).trim(),
               concurrency: single,
             };
+            if (this.credential_mode === 'console') entry.name = this.enrollment.worker_name || this.config.worker_name.trim();
             if (e.max_context) entry.max_context = Number(e.max_context);
             if (this.config.backend_api_key) entry.api_key = this.config.backend_api_key;
             return entry;
@@ -1005,7 +1004,7 @@ function setupWizard() {
           if (this.deploy.cancelled) return;
         }
         // Window closed: partial is a success worth opening the dashboard for.
-        if (this.deploy.backends.some(b => b.connected > 0)) {
+        if (this.credential_mode === 'manual' && this.deploy.backends.some(b => b.connected > 0)) {
           this.deploy.phase = 4;
           this.deploy.done = true;
           this.deploy.partial = true;
@@ -1021,6 +1020,10 @@ function setupWizard() {
     },
 
     async connectGridAccount(restart = false) {
+      if (this.selectedEntries().length > 1) {
+        this.enrollment.error = 'Select one model for Console enrollment, or use the Advanced account-key option for multiple models.';
+        return;
+      }
       this.enrollment = {
         status: 'idle', busy: true, error: '', authorize_url: '',
         worker_name: this.config.worker_name.trim(),

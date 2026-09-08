@@ -267,11 +267,9 @@ class StreamingWorker:
         return f"{self.spec.url.rstrip('/')}/models"
 
     async def _detect_context(self) -> int:
-        # An operator-set per-model cap wins over detection: they chose it to
-        # bound VRAM, and advertising more than they allowed would strand jobs.
-        if getattr(self.spec, "max_context", 0):
-            return int(self.spec.max_context)
-        return await self._detect_context_auto()
+        detected = await self._detect_context_auto()
+        cap = getattr(self.spec, "max_context", 0)
+        return min(detected, int(cap)) if cap else detected
 
     async def _detect_context_auto(self) -> int:
         """Detect this backend's true context window (vLLM max_model_len, Ollama
@@ -292,7 +290,7 @@ class StreamingWorker:
                 return int(ctx)
         except Exception as e:
             logger.debug(f"context detection failed: {e}")
-        return Settings.MAX_CONTEXT_LENGTH
+        return min(Settings.MAX_CONTEXT_LENGTH, 8192)
 
     async def _backend_healthy(self) -> bool:
         """True iff the local inference backend answers and serves our model.

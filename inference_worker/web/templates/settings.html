@@ -6,7 +6,7 @@
 {% block main_class %}form-main{% endblock %}
 
 {% block content %}
-<div x-data="settingsForm()" x-init="init()">
+<div x-data="settingsForm()">
   <form @submit.prevent="save()" class="settings-form">
     <div class="settings-grid">
     <div class="card">
@@ -44,7 +44,7 @@
       </label>
     </div>
 
-    <div class="card">
+    <div class="card" x-show="backendsLoaded && backends.length === 0">
       <h2>Backend</h2>
       <label class="field">
         <span class="field-label">Engine</span>
@@ -93,10 +93,25 @@
                 <span class="model-card-ctx-value"
                       x-text="Number(b.max_context || 0).toLocaleString() + ' ctx'"></span>
               </div>
+              <div class="model-backend-fields">
+                <label class="field"><span class="field-label">Engine</span>
+                  <select x-model="b.backend_type"><option value="ollama">Ollama</option><option value="openai">OpenAI-compatible</option></select>
+                </label>
+                <label class="field"><span class="field-label">Backend endpoint</span><input type="url" x-model="b.url" required></label>
+                <label class="field"><span class="field-label">API Key <span class="optional">(optional)</span></span>
+                  <input type="password" autocomplete="off" data-1p-ignore x-model="b.api_key" :placeholder="b.has_api_key ? 'Configured - enter a replacement' : ''">
+                </label>
+                <label class="field"><span class="field-label">Simultaneous jobs</span>
+                  <input type="number" x-model.number="b.concurrency" min="0" :max="enrolledWorkerName ? 1 : 16" required>
+                </label>
+                <label class="field"><span class="field-label">Schedule override (JSON)</span>
+                  <textarea x-model="b.schedule" :disabled="b.schedule === null" rows="3"></textarea>
+                </label>
+                <label class="checkbox-label"><input type="checkbox" :checked="b.schedule === null" @change="b.schedule = $event.target.checked ? null : ''">Use rig schedule</label>
+              </div>
             </div>
           </template>
           <div class="field-hint-slot">
-            <span x-show="backends.length > 1">Several models share one GPU — smaller contexts keep them resident instead of swapping per job.</span>
             <span x-show="backends.length <= 1">Add, pause, or remove models from the dashboard.</span>
           </div>
         </div>
@@ -119,14 +134,14 @@
 
     <div class="card">
       <h2>Limits</h2>
-      <label class="field">
+      <label class="field" x-show="backends.length === 0">
         <span class="field-label">Simultaneous jobs</span>
         <input type="number" x-model="form.GRID_MAX_THREADS" min="1"
                :max="enrolledWorkerName ? 1 : 16" :disabled="Boolean(enrolledWorkerName)">
         <div class="field-hint" x-show="enrolledWorkerName">A Console-enrolled credential is bound to one connection. Switch to an API key for parallel slots.</div>
       </label>
 
-      <div class="field">
+      <div class="field" @change="scheduleDirty = true">
         <div class="sched-head">
           <span class="field-label" style="margin-bottom: 0;">Operating schedule</span>
           <span class="sched-summary" x-text="scheduleSummary()"></span>
@@ -134,21 +149,21 @@
         <div class="sched-days">
           <template x-for="day in sched.day_list" :key="day">
             <button type="button" class="sched-day" :class="sched.days.includes(day) ? 'on' : ''"
-                    @click="toggleDay(day)" x-text="day.charAt(0).toUpperCase() + day.slice(1)"></button>
+                    @click="toggleDay(day)" :disabled="scheduleAdvanced" x-text="day.charAt(0).toUpperCase() + day.slice(1)"></button>
           </template>
         </div>
         <div class="sched-times">
           <label class="sched-time">
             <span>From</span>
-            <input type="time" x-model="sched.start">
+            <input type="time" x-model="sched.start" :disabled="scheduleAdvanced">
           </label>
           <label class="sched-time">
             <span>To</span>
-            <input type="time" x-model="sched.end">
+            <input type="time" x-model="sched.end" :disabled="scheduleAdvanced">
           </label>
           <label class="sched-time">
             <span>Jobs in window</span>
-            <input type="number" x-model.number="sched.concurrency"
+            <input type="number" x-model.number="sched.concurrency" :disabled="scheduleAdvanced"
                    :min="0" :max="enrolledWorkerName ? 1 : 16">
           </label>
         </div>
@@ -157,6 +172,10 @@
           <span x-show="sched.concurrency !== 0 && !scheduleIsDefault()">Inside this window this replaces Simultaneous jobs; outside it, Simultaneous jobs applies.</span>
         </div>
       </div>
+      <details>
+        <summary>Schedule JSON</summary>
+        <textarea x-model="form.GRID_SCHEDULE" @input="scheduleAdvanced = true; scheduleDirty = false" rows="5" aria-label="Rig schedule JSON"></textarea>
+      </details>
 
       <label class="field">
         <span class="field-label">Max response (tokens)</span>
@@ -199,7 +218,7 @@
     </div>
 
     <div class="form-actions">
-      <button type="submit" class="btn btn-primary" :disabled="saving">
+      <button type="submit" class="btn btn-primary" :disabled="saving || !backendsLoaded">
         <span x-show="!saving">Save Settings</span>
         <span x-show="saving">Saving...</span>
       </button>
@@ -220,6 +239,9 @@ function settingsForm() {
     enrolledWorkerName: {{ settings.GRID_ENROLLED_WORKER_NAME | tojson }},
     enrollment: { status: 'idle', busy: false, error: '', authorize_url: '' },
     backends: [],
+    backendsLoaded: false,
+    scheduleDirty: false,
+    scheduleAdvanced: false,
     sched: {
       day_list: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
       days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
@@ -256,10 +278,15 @@ function settingsForm() {
     async loadBackends() {
       try {
         const r = await fetch('/api/backends');
+        if (!r.ok) throw new Error('Backend roster unavailable');
         const d = await r.json();
         this.backends = d.configured || [];
-        for (const b of this.backends) this.fetchWindow(b);
-      } catch (e) { /* roster stays empty; the scalar fields still render */ }
+        for (const b of this.backends) {
+          b.api_key = '';
+          this.fetchWindow(b);
+        }
+        this.backendsLoaded = true;
+      } catch (e) { this.saveError = 'Could not load backend settings. Reload before saving.'; }
     },
 
     async fetchWindow(b) {
@@ -282,6 +309,7 @@ function settingsForm() {
       if (!raw) return;
       try {
         const windows = JSON.parse(raw);
+        this.scheduleAdvanced = Array.isArray(windows) && windows.length > 1;
         const w = Array.isArray(windows) ? windows[0] : null;
         if (!w) return;
         const days = String(w.days || '').toLowerCase();
@@ -293,7 +321,10 @@ function settingsForm() {
               const a = this.sched.day_list.indexOf(bounds[0]);
               const b = this.sched.day_list.indexOf(bounds[1]);
               if (a !== -1 && b !== -1) {
-                for (let i = a; i <= b; i++) wanted.add(this.sched.day_list[i]);
+                for (let i = a; ; i = (i + 1) % 7) {
+                  wanted.add(this.sched.day_list[i]);
+                  if (i === b) break;
+                }
               }
             } else if (this.sched.day_list.includes(bounds[0])) {
               wanted.add(bounds[0]);
@@ -308,6 +339,8 @@ function settingsForm() {
     },
 
     toggleDay(day) {
+      if (this.scheduleAdvanced) return;
+      this.scheduleDirty = true;
       const days = this.sched.days;
       const i = days.indexOf(day);
       if (i === -1) days.push(day); else days.splice(i, 1);
@@ -320,6 +353,7 @@ function settingsForm() {
     },
 
     scheduleSummary() {
+      if (this.scheduleAdvanced) return 'Custom schedule';
       if (this.sched.days.length === 0) return 'No days selected — worker stays off';
       if (this.scheduleIsDefault()) return 'Always on';
       const days = this.sched.days.length === 7 ? 'Every day' : this.sched.day_list
@@ -330,7 +364,9 @@ function settingsForm() {
     },
 
     scheduleJson() {
-      if (this.scheduleIsDefault() || this.sched.days.length === 0) return '';
+      if (this.scheduleAdvanced || !this.scheduleDirty) return this.form.GRID_SCHEDULE || '';
+      if (this.sched.days.length === 0) return JSON.stringify([{ concurrency: 0 }]);
+      if (this.scheduleIsDefault()) return '';
       const ordered = this.sched.day_list.filter(d => this.sched.days.includes(d));
       return JSON.stringify([{
         days: ordered.join(','),
@@ -380,6 +416,7 @@ function settingsForm() {
       }
     },
     async save() {
+      if (!this.backendsLoaded) return;
       this.saving = true;
       this.saved = false;
       this.saveError = '';
@@ -391,8 +428,11 @@ function settingsForm() {
             const entry = {
               name: b.name, type: b.backend_type, url: b.url,
               model: b.model, grid_model: b.grid_model,
-              concurrency: Number(b.concurrency) || 1,
+              concurrency: Number(b.concurrency),
             };
+            if (b.api_key) entry.api_key = b.api_key;
+            if (b.schedule !== null && b.schedule !== undefined) entry.schedule = b.schedule;
+            if (b.modalities) entry.modalities = b.modalities;
             if (b.max_context) entry.max_context = Number(b.max_context);
             if (b.paused) entry.paused = true;
             return entry;

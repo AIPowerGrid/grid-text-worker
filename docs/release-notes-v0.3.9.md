@@ -6,6 +6,15 @@ charging, den accounting, and payout settlement are unchanged from v0.3.8.
 
 ## Operator Changes
 
+- Multi-model setup, dashboard pause/resume, and per-model Settings are now
+  available. Multi-model rigs require an advanced account key; ordinary Console
+  enrollment remains one exact worker name and one connection.
+- Per-model Settings edit the effective endpoint, engine, credential, and
+  concurrency. Existing secrets stay server-side and are not carried to a changed
+  endpoint. Context limits cap detected backend capacity rather than replacing it.
+- Roster schedules inherit the rig schedule unless explicitly overridden.
+  Existing multi-window schedules and text/vision declarations survive edits;
+  selecting no days pauses all week. These limits do not configure GPU memory.
 - The dashboard reads Core's worker-scoped `GET /v1/workers/self` endpoint
   with the existing `worker.connect` credential.
 - The response identifies only the credential-bound worker and its own jobs

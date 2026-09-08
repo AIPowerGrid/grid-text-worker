@@ -278,11 +278,101 @@ test('a partial connection completes as partial, not as failure', async () => {
       ],
     });
   });
+  wizard.credential_mode = 'manual';
   await wizard.deployWorker();
   assert.equal(wizard.deploy.done, true);
   assert.equal(wizard.deploy.partial, true);
   assert.equal(wizard.deploy.error, '');
   assert.equal(wizard.deployConnectedCount(), 1);
+});
+
+test('selected Console roster keeps the enrolled name and clears old schedules', async () => {
+  let payload;
+  const wizard = instantiate(setup, 'setupWizard', async (url, options) => {
+    if (url === '/api/setup/complete') {
+      payload = JSON.parse(options.body);
+      return response({ok: false, error: 'capture only'});
+    }
+    throw new Error(url);
+  });
+  wizard.config.worker_name = 'test-rig';
+  wizard.enrollment.worker_name = 'test-rig';
+  wizard.model_entries = [{model: 'qwen', selected: true, max_context: 8192}];
+  await wizard.deployWorker();
+  assert.equal(JSON.parse(payload.GRID_BACKENDS)[0].name, 'test-rig');
+  assert.equal(payload.GRID_SCHEDULE, '');
+});
+
+test('Console setup rejects multiple models before saving or enrolling', async () => {
+  const wizard = instantiate(setup, 'setupWizard', async () => { throw new Error('must not fetch'); });
+  wizard.model_entries = [{model: 'a', selected: true}, {model: 'b', selected: true}];
+  await wizard.deployWorker();
+  assert.match(wizard.deploy.error, /one model/);
+  await wizard.connectGridAccount();
+  assert.match(wizard.enrollment.error, /one model/);
+});
+
+test('Console partial registration never bypasses its required canary', async () => {
+  const wizard = instantiate(setup, 'setupWizard', async url => response(
+    url === '/api/setup/complete' ? {ok: true} : {grid_connected: false, backends: [{connected: 1}]}
+  ));
+  await wizard.deployWorker();
+  assert.equal(wizard.deploy.done, false);
+});
+
+function settingsInstance(fetch = async () => response({ok: true})) {
+  // Render non-secret template values just as the server does; execute the
+  // actual settings controller, not a duplicate implementation.
+  return instantiate(settings.replace(/{{[\s\S]*?}}/g, '""'), 'settingsForm', fetch);
+}
+
+test('empty day selection produces an explicit all-week pause in both editors', () => {
+  const wizard = instantiate(setup, 'setupWizard', async () => response({}));
+  const editor = settingsInstance();
+  for (const page of [wizard, editor]) {
+    page.sched.days = [];
+    page.scheduleDirty = true;
+    assert.deepEqual(JSON.parse(page.scheduleJson()), [{concurrency: 0}]);
+  }
+});
+
+test('settings preserves multiple windows and wrapping days without an edit', () => {
+  const editor = settingsInstance();
+  editor.form.GRID_MAX_THREADS = '1';
+  const raw = '[{"days":"fri-mon","concurrency":0},{"days":"tue","concurrency":0}]';
+  editor.form.GRID_SCHEDULE = raw;
+  editor.hydrateSchedule();
+  assert.equal(editor.scheduleJson(), raw);
+  assert.equal(editor.scheduleAdvanced, true);
+  assert.deepEqual(Array.from(editor.sched.days), ['mon', 'fri', 'sat', 'sun']);
+});
+
+test('settings serializes the edited per-backend values and preserves overrides', async () => {
+  let payload;
+  const editor = settingsInstance(async (_url, options) => {
+    payload = JSON.parse(options.body);
+    return response({ok: true});
+  });
+  editor.backendsLoaded = true;
+  editor.backends = [{name: 'rig-a', backend_type: 'openai', url: 'http://127.0.0.1:9000/v1',
+    model: 'qwen', grid_model: 'qwen', concurrency: 3, api_key: 'replacement-fixture',
+    schedule: '[{"concurrency":0}]', modalities: ['text'], max_context: 8192}];
+  await editor.save();
+  const entry = JSON.parse(payload.GRID_BACKENDS)[0];
+  assert.equal(entry.url, 'http://127.0.0.1:9000/v1');
+  assert.equal(entry.concurrency, 3);
+  assert.equal(entry.api_key, 'replacement-fixture');
+  assert.equal(entry.schedule, '[{"concurrency":0}]');
+  assert.deepEqual(entry.modalities, ['text']);
+  assert.equal(editor.saved, true);
+});
+
+test('settings cannot overwrite configuration after a roster fetch failure', async () => {
+  const editor = settingsInstance(async () => ({ok: false}));
+  await editor.loadBackends();
+  assert.equal(editor.backendsLoaded, false);
+  await editor.save();
+  assert.equal(editor.saved, false);
 });
 
 test('a rejected key is not a successful setup', async () => {

@@ -46,6 +46,11 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   `connection_error` reaches the dashboard without remote response bodies.
 - The supervisor optionally exposes its active workers to the dashboard and
   awaits child cleanup before returning, including scheduled scale-down.
+- A roster entry without `schedule` inherits `GRID_SCHEDULE`; an explicit empty
+  schedule is always-on at that entry's concurrency. Preserve this distinction
+  and explicit modality declarations across all roster edits. `max_context`
+  caps detected context, never enlarges it; missing detection falls back to at
+  most 8,192 tokens. This is an advertised request limit, not a VRAM allocator.
 - `eth-account` is a required runtime dependency. Every shipped worker signs
   result receipts; release binaries must pass `--verify-runtime` before staging.
 - Secure Console enrollment is the default for a single backend with one

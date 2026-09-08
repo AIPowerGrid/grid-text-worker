@@ -305,10 +305,12 @@ h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.5rem; }
 .field-hint { font-size: 0.78rem; color: var(--text-dim); margin-top: 0.25rem; }
 
 input[type="text"],
+input[type="url"],
 input[type="password"],
 input[type="number"],
 input[type="time"],
-select {
+select,
+textarea {
   width: 100%;
   padding: 0.5rem 0.7rem;
   color-scheme: dark;
@@ -320,7 +322,8 @@ select {
   font-family: var(--font);
   transition: border-color 0.15s;
 }
-input:focus, select:focus { outline: none; border-color: var(--border-focus); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--border-focus); }
+textarea { resize: vertical; }
 input::placeholder { color: var(--text-dim); opacity: 0.6; }
 
 select {
@@ -697,7 +700,7 @@ code { font-size: 0.8rem; color: var(--green); background: var(--bg); padding: 0
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.25rem;
-  align-items: stretch; /* cards sharing a row share its height */
+  align-items: start;
 }
 .settings-grid > .card {
   margin-bottom: 0;
@@ -1632,3 +1635,18 @@ ul li::before { content: "\2022"; color: var(--accent); margin-right: 0.5rem; }
   justify-content: flex-end !important;
 }
 .settings-form .settings-grid { margin-bottom: 1.5rem; }
+.model-backend-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+  padding: 12px;
+  min-width: 0;
+}
+.model-backend-fields .field,
+.model-backend-fields input:not([type="checkbox"]),
+.model-backend-fields textarea {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.model-backend-fields .field { margin-bottom: 0; }
