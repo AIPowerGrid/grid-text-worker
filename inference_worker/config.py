@@ -162,6 +162,8 @@ class Backend:
     grid_model_name: str  # name advertised to the grid
     concurrency: int = 1
     schedule: str = ""    # optional per-backend GRID_SCHEDULE JSON
+    paused: bool = False  # operator pause — supervisor holds this backend at 0 connections
+    max_context: int = 0  # operator cap on the advertised context window (0 = auto-detect)
     modalities: list[str] = field(default_factory=lambda: ["text"])  # input modalities advertised to the grid
     modalities_declared: bool = False  # True if the operator set modalities/vision explicitly (skip auto-detect)
 
@@ -220,6 +222,8 @@ def load_backends() -> list[Backend]:
                 grid_model_name=grid_model,
                 concurrency=int(s.get("concurrency", 1)),
                 schedule=s.get("schedule", ""),
+                paused=bool(s.get("paused", False)),
+                max_context=int(s.get("max_context", 0) or 0),
                 modalities=_parse_modalities(s),
                 modalities_declared=("modalities" in s or "vision" in s),
             ))

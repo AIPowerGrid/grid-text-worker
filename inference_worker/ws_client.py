@@ -191,6 +191,15 @@ class StreamingWorker:
         return self._endpoint_url("chat/completions")
 
     async def _probe_formats(self) -> list:
+        # Serialize probing per backend URL: with several models on one engine
+        # (the Ollama case), concurrent first-generation probes force parallel
+        # cold loads and every probe times out. One at a time, each is quick
+        # once the previous model finished loading.
+        lock = _probe_locks.setdefault(self.spec.url, asyncio.Lock())
+        async with lock:
+            return await self._probe_formats_locked()
+
+    async def _probe_formats_locked(self) -> list:
         """Detect which API formats the backend can ACTUALLY serve by sending a
         minimal valid request in each shape and keeping only those that return a
         usable 200.
@@ -213,10 +222,16 @@ class StreamingWorker:
         formats = []
         for fmt in ("openai-chat", "openai-responses", "anthropic"):
             suffix = FORMAT_SUFFIX[fmt]
+            # The first probe may trigger a cold model load; on a multi-model
+            # roster two connections probing at once would make one shared
+            # backend load several models simultaneously and time BOTH out.
+            # _probe_formats() serializes per URL, and openai-chat (always
+            # probed first) gets a cold-load-sized timeout.
+            timeout = 120 if fmt == "openai-chat" else 30
             try:
                 r = await self.backend.post(
                     self._endpoint_url(suffix), json=bodies[fmt],
-                    headers=self._get_auth_headers(), timeout=30,
+                    headers=self._get_auth_headers(), timeout=timeout,
                 )
             except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPError) as e:
                 logger.info(f"Backend does not serve {fmt} ({suffix}): {type(e).__name__}")
@@ -252,6 +267,13 @@ class StreamingWorker:
         return f"{self.spec.url.rstrip('/')}/models"
 
     async def _detect_context(self) -> int:
+        # An operator-set per-model cap wins over detection: they chose it to
+        # bound VRAM, and advertising more than they allowed would strand jobs.
+        if getattr(self.spec, "max_context", 0):
+            return int(self.spec.max_context)
+        return await self._detect_context_auto()
+
+    async def _detect_context_auto(self) -> int:
         """Detect this backend's true context window (vLLM max_model_len, Ollama
         model_info, LM Studio, koboldcpp) so we advertise the model's real limit
         per backend — not one static number for everything. Falls back to the
@@ -1021,6 +1043,10 @@ def effective_concurrency(backend=None, now=None) -> int:
     """Concurrency for 'now' per the backend's schedule; else its concurrency.
     Clamped >=0. With no backend, falls back to the global env (back-compat)."""
     if backend is not None:
+        # Operator pause beats schedule and concurrency: the supervisor hangs up
+        # this backend's connections on its next pass and keeps them down.
+        if getattr(backend, "paused", False):
+            return 0
         base = max(int(backend.concurrency), 0)
         raw = (backend.schedule or "").strip()
     else:
@@ -1039,6 +1065,16 @@ def effective_concurrency(backend=None, now=None) -> int:
 
 
 SUPERVISOR_INTERVAL = 30  # seconds between concurrency re-evaluations
+
+# Per-backend-URL probe locks (see _probe_formats): keyed by URL so distinct
+# engines still probe in parallel while one shared engine loads serially.
+_probe_locks: dict[str, "asyncio.Lock"] = {}
+
+# Live backend specs, keyed by backend name, published by run_workers() so the
+# web layer can flip `paused` on a serving backend without a process restart.
+# The supervisor re-reads effective_concurrency() every pass, so a mutation
+# here takes effect within SUPERVISOR_INTERVAL seconds.
+LIVE_BACKENDS: dict[str, object] = {}
 
 
 def _connection_names(base: str, n: int):
@@ -1078,6 +1114,8 @@ async def run_workers(
     if expected_workers is None:
         expected_workers = set()
     backends = load_backends()
+    LIVE_BACKENDS.clear()
+    LIVE_BACKENDS.update({b.name: b for b in backends})
     logger.info(
         "serving %d backend(s): %s",
         len(backends),
@@ -1111,6 +1149,7 @@ async def run_workers(
                     await asyncio.gather(task, return_exceptions=True)
             await asyncio.sleep(SUPERVISOR_INTERVAL)
     finally:
+        LIVE_BACKENDS.clear()
         for t in tasks.values():
             t.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
