@@ -505,3 +505,21 @@ def test_settings_save_preserves_per_backend_api_keys(dashboard_client, monkeypa
     assert response.status_code == 200
     saved = json.loads(captured["GRID_BACKENDS"])
     assert saved[0]["api_key"] == "sk-secret"
+
+
+def test_stray_value_errors_return_a_generic_message(dashboard_client, monkeypatch):
+    """Only SettingsValidationError messages are echoed; a stray ValueError
+    from a future unwrapped library call must not leak into the response."""
+    from inference_worker.web import routes as routes_mod
+
+    def explode(value):
+        raise ValueError("invalid literal for int() with base 10: 'secret-input'")
+
+    monkeypatch.setattr(routes_mod, "_validated_backend_settings", explode)
+    response = dashboard_client.post(
+        "/api/settings",
+        headers={"Authorization": "Bearer dashboard-test-token"},
+        json={"GRID_MAX_THREADS": "boom"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid backend settings"

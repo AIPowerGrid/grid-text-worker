@@ -45,6 +45,14 @@ _PERSISTED_BACKEND_SETTINGS = frozenset(
     }
 )
 _SCHEDULE_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+
+class SettingsValidationError(ValueError):
+    """A validation failure whose message was authored for the operator.
+
+    Endpoints echo str(exc) for THIS type only; any other exception gets a
+    generic message, so a stray library error can never leak internals into
+    an HTTP response (CodeQL py/stack-trace-exposure)."""
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -111,27 +119,30 @@ def _set_auth_cookie(response, request: Request) -> None:
 
 def _validated_backend_settings(value: object) -> dict:
     if not isinstance(value, dict):
-        raise ValueError("Settings payload must be an object")
+        raise SettingsValidationError("Settings payload must be an object")
     if set(value) - _PERSISTED_BACKEND_SETTINGS:
-        raise ValueError("Settings payload contains unsupported fields")
+        raise SettingsValidationError("Settings payload contains unsupported fields")
     form = {}
     for key, raw in value.items():
         text = str(raw) if raw is not None else ""
         limit = 8192 if key == "GRID_SCHEDULE" else 4096
         if len(text) > limit or "\n" in text or "\r" in text:
-            raise ValueError(f"Invalid value for {key}")
+            raise SettingsValidationError(f"Invalid value for {key}")
         form[key] = text
     for key in ("OLLAMA_URL", "OPENAI_URL"):
         if key in form and form[key]:
-            form[key] = validated_backend_url(form[key])
+            try:
+                form[key] = validated_backend_url(form[key])
+            except ValueError as exc:
+                raise SettingsValidationError(str(exc)) from exc
     if "GRID_SCHEDULE" in form:
         form["GRID_SCHEDULE"] = _validated_schedule(form["GRID_SCHEDULE"])
     if "GRID_BACKENDS" in form:
         form["GRID_BACKENDS"] = _validated_backends_json(form["GRID_BACKENDS"])
     if "BACKEND_TYPE" in form and form["BACKEND_TYPE"] not in {"ollama", "openai"}:
-        raise ValueError("Unsupported backend type")
+        raise SettingsValidationError("Unsupported backend type")
     if "GRID_NSFW" in form and form["GRID_NSFW"].lower() not in {"true", "false"}:
-        raise ValueError("GRID_NSFW must be true or false")
+        raise SettingsValidationError("GRID_NSFW must be true or false")
     for key, lower, upper in (
         ("GRID_MAX_THREADS", 1, 16),
         ("GRID_MAX_LENGTH", 64, 32768),
@@ -142,9 +153,9 @@ def _validated_backend_settings(value: object) -> dict:
         try:
             number = int(form[key])
         except ValueError as exc:
-            raise ValueError(f"{key} must be an integer") from exc
+            raise SettingsValidationError(f"{key} must be an integer") from exc
         if not lower <= number <= upper:
-            raise ValueError(f"{key} is outside the supported range")
+            raise SettingsValidationError(f"{key} is outside the supported range")
         form[key] = str(number)
     return form
 
@@ -154,19 +165,19 @@ def _validated_schedule(value: object) -> str:
     if value is None or value == "":
         return ""
     if not isinstance(value, str) or len(value) > 8192:
-        raise ValueError("Schedule must be JSON text")
+        raise SettingsValidationError("Schedule must be JSON text")
     try:
         windows = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise ValueError("Schedule must be valid JSON") from exc
+        raise SettingsValidationError("Schedule must be valid JSON") from exc
     if not isinstance(windows, list) or len(windows) > 32:
-        raise ValueError("Schedule must be a list of at most 32 windows")
+        raise SettingsValidationError("Schedule must be a list of at most 32 windows")
 
     for window in windows:
         if not isinstance(window, dict):
-            raise ValueError("Each schedule window must be an object")
+            raise SettingsValidationError("Each schedule window must be an object")
         if set(window) - {"days", "start", "end", "concurrency"}:
-            raise ValueError("Schedule window contains an unknown field")
+            raise SettingsValidationError("Schedule window contains an unknown field")
         days = str(window.get("days") or "daily").strip().lower()
         if days not in {"*", "all", "daily"}:
             for part in days.split(","):
@@ -174,17 +185,17 @@ def _validated_schedule(value: object) -> str:
                 if len(bounds) not in {1, 2} or any(
                     item not in _SCHEDULE_DAYS for item in bounds
                 ):
-                    raise ValueError("Schedule days must use mon-sun names")
+                    raise SettingsValidationError("Schedule days must use mon-sun names")
         for field in ("start", "end"):
             if field in window and not _TIME_RE.fullmatch(str(window[field])):
-                raise ValueError(f"Schedule {field} must use 24-hour HH:MM")
+                raise SettingsValidationError(f"Schedule {field} must use 24-hour HH:MM")
         concurrency = window.get("concurrency")
         if (
             isinstance(concurrency, bool)
             or not isinstance(concurrency, int)
             or not 0 <= concurrency <= 16
         ):
-            raise ValueError("Schedule concurrency must be an integer from 0 to 16")
+            raise SettingsValidationError("Schedule concurrency must be an integer from 0 to 16")
     return json.dumps(windows, separators=(",", ":"))
 
 
@@ -193,34 +204,37 @@ def _validated_backends_json(value: object) -> str:
     if value is None or value == "":
         return ""
     if not isinstance(value, str) or len(value) > 16384:
-        raise ValueError("Backends must be JSON text")
+        raise SettingsValidationError("Backends must be JSON text")
     try:
         entries = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise ValueError("Backends must be valid JSON") from exc
+        raise SettingsValidationError("Backends must be valid JSON") from exc
     if not isinstance(entries, list) or not entries or len(entries) > 16:
-        raise ValueError("Backends must be a list of 1-16 entries")
+        raise SettingsValidationError("Backends must be a list of 1-16 entries")
     allowed = {"name", "type", "url", "api_key", "model", "grid_model", "concurrency", "schedule", "paused", "max_context"}
     for entry in entries:
         if not isinstance(entry, dict):
-            raise ValueError("Each backend must be an object")
+            raise SettingsValidationError("Each backend must be an object")
         if set(entry) - allowed:
-            raise ValueError("Backend entry contains an unknown field")
+            raise SettingsValidationError("Backend entry contains an unknown field")
         if not str(entry.get("model") or "").strip():
-            raise ValueError("Each backend needs a model")
+            raise SettingsValidationError("Each backend needs a model")
         if str(entry.get("type", "ollama")).lower() not in {"ollama", "openai"}:
-            raise ValueError("Unsupported backend type")
+            raise SettingsValidationError("Unsupported backend type")
         if entry.get("url"):
-            entry["url"] = validated_backend_url(str(entry["url"]))
+            try:
+                entry["url"] = validated_backend_url(str(entry["url"]))
+            except ValueError as exc:
+                raise SettingsValidationError(str(exc)) from exc
         concurrency = entry.get("concurrency", 1)
         if isinstance(concurrency, bool) or not isinstance(concurrency, int) or not 1 <= concurrency <= 16:
-            raise ValueError("Backend concurrency must be an integer from 1 to 16")
+            raise SettingsValidationError("Backend concurrency must be an integer from 1 to 16")
         if entry.get("schedule"):
             entry["schedule"] = _validated_schedule(entry["schedule"])
         if "max_context" in entry and entry["max_context"]:
             ctx = entry["max_context"]
             if isinstance(ctx, bool) or not isinstance(ctx, int) or not 256 <= ctx <= 1048576:
-                raise ValueError("Backend max_context must be an integer from 256 to 1048576")
+                raise SettingsValidationError("Backend max_context must be an integer from 256 to 1048576")
     return json.dumps(entries, separators=(",", ":"))
 
 
@@ -481,8 +495,10 @@ async def api_complete_setup(request: Request):
     """Save config and start the worker."""
     try:
         form = _validated_backend_settings(await request.json())
-    except ValueError as exc:
+    except SettingsValidationError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
     if error := _enrolled_settings_error(form):
         return JSONResponse({"ok": False, "error": error}, status_code=400)
 
@@ -666,8 +682,10 @@ async def save_settings(request: Request):
     """Save settings to .env and update in-memory config."""
     try:
         form = _validated_backend_settings(await request.json())
-    except ValueError as exc:
+    except SettingsValidationError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Invalid backend settings"}, status_code=400)
     if error := _enrolled_settings_error(form):
         return JSONResponse({"ok": False, "error": error}, status_code=400)
 
