@@ -68,6 +68,9 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   `docs/release-notes-v0.3.8.md` also records the subsequent owned headless
   source-bridge rollout and real native-logprob relay proof, distinct from
   frozen-binary qualification or end-to-end validator fidelity authority.
+- `docs/release-notes-v0.3.9.md` records exact tagged Linux production
+  qualification, the required deployed Core label/budget fixes, platform trust
+  limits, and the separate incidental test-worker accounting reconciliation.
 - `tests/` — pytest smoke tests.
 
 ## Local Contracts
