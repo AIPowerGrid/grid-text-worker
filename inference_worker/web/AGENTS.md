@@ -108,3 +108,23 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 ## Child DOX Index
 
 - None — leaf.
+
+## Multi-model roster (GRID_BACKENDS in the web layer)
+- The wizard's model step is a multi-select roster; every selection ships in
+  `GRID_BACKENDS` via `/api/setup/complete` (validated by
+  `_validated_backends_json`). One selection uses the same path — never the
+  scalar-vs-array split.
+- `/api/status` carries a `backends` array (per-backend connection state and
+  session counters from `_backend_rows`). The dashboard Models table renders
+  it plus `/api/backends`' `available` list (Ollama tags, models not serving).
+- Roster mutations: `/api/backends/add` and `/api/backends/remove` rewrite
+  GRID_BACKENDS and restart the worker task (the supervisor builds its roster
+  at start). `/api/backends/pause` flips the live spec through
+  `ws_client.LIVE_BACKENDS` (takes effect within SUPERVISOR_INTERVAL) and
+  persists `paused` in the entry so restarts keep it.
+- `reload_settings` pushes GRID_BACKENDS into `os.environ` because
+  `load_backends()` reads the process environment — without that, an in-app
+  restart serves the roster snapshotted at process start.
+- Session-rate tiles capture den/hr + jobs/hr only after 120s uptime (early
+  samples extrapolate wildly), then hold; the refresh button and a 30-minute
+  timer re-capture.
