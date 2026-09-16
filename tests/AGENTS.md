@@ -9,6 +9,10 @@ does not currently prove a live backend-to-Grid job lifecycle.
 
 - `test_smoke.py` - known-engine table, OpenAI model parsing, header detection,
   platform helpers, and backend URL policy.
+- `test_lmstudio_context.py` - native loaded-instance aliases, catalog-key
+  fallback, multiple-instance minimum, malformed/unloaded metadata, and the
+  actual worker context-detection/cap path. Mock HTTP metadata is not a live
+  LM Studio or production registration test.
 - `test_web_security.py` - management-plane redirect and backend-persistence
   boundaries, real login form parsing/cookies, model-test response handling,
   Core canary proxy redaction, dashboard-link clipboard behavior, and

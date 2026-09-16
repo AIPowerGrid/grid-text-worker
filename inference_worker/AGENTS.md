@@ -51,6 +51,11 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   and explicit modality declarations across all roster edits. `max_context`
   caps detected context, never enlarges it; missing detection falls back to at
   most 8,192 tokens. This is an advertised request limit, not a VRAM allocator.
+- LM Studio context detection matches loaded-instance API identifiers before
+  catalog keys. Only positive integer loaded contexts count; catalog maximums
+  for unloaded models are not runtime capacity. When a catalog key addresses
+  multiple instances, use their smallest context; missing instance context
+  leaves detection unknown and preserves the conservative fallback.
 - `eth-account` is a required runtime dependency. Every shipped worker signs
   result receipts; release binaries must pass `--verify-runtime` before staging.
 - Secure Console enrollment is the default for a single backend with one

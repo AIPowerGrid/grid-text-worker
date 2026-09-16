@@ -555,6 +555,37 @@ def get_platform() -> str:
     return "linux"
 
 
+def _lmstudio_loaded_context(models: object, model_name: Optional[str]) -> Optional[int]:
+    """Resolve API aliases before catalog keys; never advertise unloaded capacity."""
+    if not isinstance(models, list):
+        return None
+    instances = []
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        loaded = model.get("loaded_instances") or []
+        if not isinstance(loaded, list):
+            if not model_name or model.get("key") == model_name:
+                return None
+            continue
+        instances.extend((model.get("key"), instance) for instance in loaded)
+
+    aliases = [instance for _, instance in instances
+               if model_name and isinstance(instance, dict)
+               and instance.get("id") == model_name]
+    selected = aliases or [instance for key, instance in instances
+                           if not model_name or key == model_name]
+    contexts = []
+    for instance in selected:
+        config = instance.get("config") if isinstance(instance, dict) else None
+        context = config.get("context_length") if isinstance(config, dict) else None
+        if type(context) is not int or context <= 0:
+            return None
+        contexts.append(context)
+    # A catalog key can cover differently sized loaded instances. Bound all of them.
+    return min(contexts) if contexts else None
+
+
 async def get_model_context_length(url: str, engine: str = None, model_name: str = None, api_key: str = "") -> dict:
     """Try to detect the model's context length from the backend.
     Returns {"context_length": int} or {"context_length": null}."""
@@ -602,23 +633,10 @@ async def get_model_context_length(url: str, engine: str = None, model_name: str
                         ctx = data.get("value")
 
             elif engine == "lmstudio":
-                # LM Studio native API: GET /api/v1/models has max_context_length per model
+                # API identifiers live on loaded instances, not necessarily model keys.
                 resp = await client.get(f"{url}/api/v1/models")
                 if resp.status_code == 200:
-                    data = resp.json()
-                    for m in data.get("models", []):
-                        key = m.get("key", "")
-                        if model_name and key != model_name:
-                            continue
-                        # Prefer loaded instance's context_length, else model max
-                        loaded = m.get("loaded_instances") or []
-                        if loaded and "config" in loaded[0]:
-                            ctx = loaded[0]["config"].get("context_length")
-                        if ctx is None:
-                            ctx = m.get("max_context_length")
-                        if ctx is not None:
-                            ctx = int(ctx)
-                            break
+                    ctx = _lmstudio_loaded_context(resp.json().get("models"), model_name)
 
             else:
                 # vLLM and other OpenAI-compat — check /v1/models for max_model_len
