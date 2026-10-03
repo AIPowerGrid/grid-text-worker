@@ -78,3 +78,18 @@ def nonce_match(answer: str, nonce: str) -> int:
     digits = "".join(c for c in answer if c.isdigit())[: len(nonce)]
     digits = digits.ljust(len(nonce))
     return sum(1 for a, b in zip(digits, nonce) if a == b)
+
+
+def nonce_in_text(text: str, nonce: str) -> bool:
+    """True if the nonce appears as one run of digits in free text.
+
+    For reasoning output, which may contain unrelated numbers before the model
+    reads the image. Digits may be separated by spaces, commas or hyphens
+    ("7 3 9 1"), but the run must not continue into neighbouring digits, so a
+    longer number that merely contains the nonce does not count.
+    """
+    import re
+
+    separator = r"[\s,\-]*"
+    pattern = r"(?<!\d)" + separator.join(re.escape(d) for d in nonce) + r"(?!\d)"
+    return re.search(pattern, text or "") is not None

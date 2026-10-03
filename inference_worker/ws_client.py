@@ -38,6 +38,33 @@ FORMAT_SUFFIX = {
 }
 
 
+# One vision verdict per (engine, URL, model) for the whole process. Every
+# parallel connection to the same backend shares it, so 8 slots cannot report
+# a mix of "vision" and "text-only" for one model, and reconnects don't re-probe.
+_VISION_VERDICTS: dict[tuple[str, str, str], bool] = {}
+_VISION_LOCKS: dict[tuple[str, str, str], asyncio.Lock] = {}
+
+# Reasoning models may think before answering; give them room. The probe also
+# asks templates that support it to skip thinking (vLLM/SGLang/llama.cpp).
+VISION_PROBE_MAX_TOKENS = 1024
+
+
+def _vision_probe_answer_match(message: dict, nonce: str) -> int:
+    """Best nonce match across the visible answer and either reasoning field.
+
+    vLLM returns `reasoning` (older builds and DeepSeek-style servers use
+    `reasoning_content`). The nonce exists only inside the image, so finding it
+    in reasoning text still proves the model saw the picture.
+    """
+    content = message.get("content")
+    match = vision_probe.nonce_match(content, nonce) if isinstance(content, str) else 0
+    for field in ("reasoning_content", "reasoning"):
+        text = message.get(field)
+        if isinstance(text, str) and vision_probe.nonce_in_text(text, nonce):
+            match = len(nonce)
+    return match
+
+
 def _normalize_stream_delta(delta: dict) -> dict:
     """Normalize vLLM's alternate reasoning field without mutating its chunk."""
     if delta.get("reasoning") and not delta.get("reasoning_content"):
@@ -537,6 +564,25 @@ class StreamingWorker:
     async def _detect_vision(self) -> bool:
         """Return True if this backend's model accepts image input.
 
+        Probed once per (engine, URL, model) and shared by every connection to
+        that backend; only a definitive answer is cached, so a backend that is
+        still loading is probed again on the next connect.
+        """
+        key = (self.spec.backend_type, self.spec.url.rstrip("/"), self.model_name)
+        if key in _VISION_VERDICTS:
+            return _VISION_VERDICTS[key]
+        lock = _VISION_LOCKS.setdefault(key, asyncio.Lock())
+        async with lock:
+            if key in _VISION_VERDICTS:
+                return _VISION_VERDICTS[key]
+            verdict = await self._probe_vision()
+            if verdict is not None:
+                _VISION_VERDICTS[key] = verdict
+            return bool(verdict)
+
+    async def _probe_vision(self) -> bool | None:
+        """Run the vision probe. Returns None when the result is inconclusive.
+
         Two reliable signals (validated against moondream + text models):
           * ollama: GET /api/show -> capabilities includes "vision" (authoritative,
             free, no inference).
@@ -545,7 +591,7 @@ class StreamingWorker:
             reading >=3/4 digits proves genuine image input. vLLM silently
             200s/ignores and ollama text models 400-reject — neither produces the
             nonce, so both read as text-only with ~0 false positives.
-        Any error -> text-only (fail safe: never falsely claim vision).
+        Errors never claim vision (fail safe).
         """
         try:
             if self.spec.backend_type == "ollama":
@@ -566,25 +612,31 @@ class StreamingWorker:
             nonce = vision_probe.make_nonce()
             payload = {
                 "model": self.model_name,
-                "max_tokens": 200,
+                "max_tokens": VISION_PROBE_MAX_TOKENS,
                 "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [{"role": "user", "content": [
                     {"type": "text", "text": "Reply with EXACTLY the 4 digits in the image, or NO_IMAGE if you received no image."},
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64," + vision_probe.render_nonce_png_b64(nonce)}},
                 ]}],
             }
-            resp = await self.backend.post(
-                self._get_completions_url(), json=payload, headers=self._get_auth_headers()
-            )
+            url = self._get_completions_url()
+            headers = self._get_auth_headers()
+            resp = await self.backend.post(url, json=payload, headers=headers)
+            if resp.status_code == 400:
+                # Strict OpenAI-compatible servers reject unknown fields; retry
+                # plain. A text-only model's 400 repeats and reads as text-only.
+                payload.pop("chat_template_kwargs")
+                resp = await self.backend.post(url, json=payload, headers=headers)
             if resp.status_code != 200:
                 logger.info(
                     f"🔎 vision detect (probe) {self.grid_model_name}: text-only "
                     f"(HTTP {resp.status_code})"
                 )
-                return False
-            msg = (resp.json().get("choices") or [{}])[0].get("message", {})
-            answer = (msg.get("content") or "") + " " + (msg.get("reasoning_content") or "")
-            match = vision_probe.nonce_match(answer, nonce)
+                # 4xx is the backend's answer about images; 5xx/429 is not.
+                return False if 400 <= resp.status_code < 500 and resp.status_code != 429 else None
+            msg = (resp.json().get("choices") or [{}])[0].get("message", {}) or {}
+            match = _vision_probe_answer_match(msg, nonce)
             vision = match >= 3
             logger.info(
                 f"🔎 vision detect (nonce probe) {self.grid_model_name}: "
@@ -594,9 +646,9 @@ class StreamingWorker:
         except Exception as e:
             logger.info(
                 f"🔎 vision detect {self.grid_model_name} failed "
-                f"({type(e).__name__}); assuming text-only"
+                f"({type(e).__name__}); assuming text-only for now"
             )
-            return False
+            return None
 
     def _build_backend_request(self, job_id: str, payload: dict) -> tuple[dict, bool]:
         """Build the OpenAI request we send to the local backend.

@@ -136,6 +136,7 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
   installed worker.
 - `grid-inference-worker --no-gui` should boot the token-protected dashboard at
   `http://localhost:7861` without exposing the token in the settled browser URL.
+  `grid-inference-worker --setup` must configure a headless server without a browser.
 - Every frozen platform must pass `scripts/verify-bundled-ca.py` during build.
   `--help` alone does not verify the default Grid TLS path or onboarding. Linux
   x64 targets Ubuntu 22.04+; the ARM64 build targets Ubuntu 24.04+.

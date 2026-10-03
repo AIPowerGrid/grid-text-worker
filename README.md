@@ -46,6 +46,7 @@ candidate qualification.
 **macOS** — Unzip, then open `Grid Inference Worker.app`.
 
 **Linux** — `chmod +x grid-inference-worker-linux-x64 && ./grid-inference-worker-linux-x64`
+(the `install-worker.sh` route below installs it as `grid-inference-worker`).
 
 Beginning with `v0.3.7`, Linux operators can download
 `install-worker.sh` from the same release, inspect it, and run it. The script
@@ -86,6 +87,30 @@ or ROI guarantee.
 The desktop manager can copy an authenticated dashboard link for another local
 browser. In headless mode, run `grid-inference-worker --show-dashboard-link`
 explicitly; normal startup logs never print the dashboard token.
+
+### Headless servers (SSH, no browser)
+
+Set up in the terminal instead of the browser wizard:
+
+```bash
+# Prompts for each choice
+grid-inference-worker --setup
+
+# No prompts: reads the served model from the backend, proves it answers,
+# saves the config and installs the service
+grid-inference-worker --setup --backend-url http://127.0.0.1:8000 \
+  --api-key YOUR_API_KEY --concurrency 8 --install-service
+```
+
+With one connection and no `--api-key`, `--setup` prints the secure Console
+approval link instead. More than one parallel job needs an advanced account
+key. Pass `--model` when the backend serves several models. The context window
+is read from the backend each time the worker connects. The backend URL may be
+given with or without a trailing `/v1`.
+
+On Linux, `--install-service` asks for your password with `sudo` in a terminal
+(or a desktop prompt when there is no terminal). If neither is available it
+prints the systemd unit and the commands to install it by hand.
 
 Once your worker is running, chat with your model at [aipg.chat](https://aipg.chat) — select your model in the upper selector.
 
@@ -135,14 +160,18 @@ grid-inference-worker \
 
 ```
 --model NAME            Model name (e.g. llama3.2:3b)
---backend-url URL       Backend URL (e.g. http://127.0.0.1:11434)
+--backend-url URL       Backend URL (e.g. http://127.0.0.1:11434; a trailing /v1 is fine)
 --api-key KEY           Grid API key
 --worker-name NAME      Worker name on the grid
+--setup                 Set up in the terminal; with --backend-url, no prompts
+--concurrency N         Parallel jobs for --setup (1-16; >1 needs --api-key)
+--grid-model NAME       Model name shown on the grid (--setup)
+--backend-api-key KEY   API key for the inference backend, if required (--setup)
 --port PORT             Web dashboard port (default: 7861)
 --host HOST             Dashboard bind host (default: 127.0.0.1)
 --gui                   Show the desktop control window (default for binaries)
 --no-gui                Skip the desktop control window
---install-service       Install as a system service (auto-start on boot)
+--install-service       Install as a system service (auto-start on boot; after --setup)
 --uninstall-service     Remove the system service
 --service-status        Check if the service is installed
 ```

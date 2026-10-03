@@ -106,7 +106,7 @@ def status():
 def schedule_start():
     """Start the service after a brief delay (allows current process to release port 7861).
 
-    On Linux, the delayed start is baked into the install command (single pkexec prompt),
+    On Linux, the delayed start is baked into the install command (single sudo/pkexec prompt),
     so this is only needed for Windows and macOS.
     """
     import subprocess
@@ -195,7 +195,6 @@ def _win_uninstall(verbose: bool = True) -> bool:
 def _linux_install(verbose: bool = True, start: bool = True) -> bool:
     import getpass
     import shlex
-    import subprocess
     import tempfile
     username = getpass.getuser()
 
@@ -257,16 +256,7 @@ WantedBy=multi-user.target
             f" >/dev/null 2>&1 &"
         )
 
-    try:
-        if os.geteuid() == 0:
-            subprocess.run(["bash", "-c", cmds], check=True, capture_output=True)
-        else:
-            result = subprocess.run(["pkexec", "bash", "-c", cmds], capture_output=True)
-            if result.returncode != 0:
-                tmp.unlink(missing_ok=True)
-                if verbose:
-                    print("  Authentication cancelled or pkexec failed.")
-                return False
+    if _run_privileged(cmds):
         tmp.unlink(missing_ok=True)
         if verbose:
             print(f"  System service installed.")
@@ -277,22 +267,63 @@ WantedBy=multi-user.target
             print(f"    sudo systemctl restart {_SERVICE_NAME}")
             print(f"    journalctl -u {_SERVICE_NAME} -f")
             print()
-            print(f"  To remove: sudo grid-inference-worker --uninstall-service")
+            print(f"  To remove: grid-inference-worker --uninstall-service")
         return True
-    except FileNotFoundError:
-        tmp.unlink(missing_ok=True)
-        if verbose:
-            print("  pkexec not found. Install with sudo instead:")
-            print(f"    sudo grid-inference-worker --install-service")
+    tmp.unlink(missing_ok=True)
+    if verbose:
+        _print_manual_linux_install(unit_content, frozen)
+    return False
+
+
+def _run_privileged(cmds: str) -> bool:
+    """Run a root shell snippet; return True on success.
+
+    Root runs it directly. A terminal session uses ``sudo`` (works over SSH on a
+    headless server, where pkexec has no agent to ask for the password). A
+    desktop session without a terminal uses ``pkexec``'s graphical prompt.
+    """
+    import shutil
+    import subprocess
+
+    if os.geteuid() == 0:
+        launcher: list[str] = []
+    elif sys.stdin is not None and sys.stdin.isatty() and shutil.which("sudo"):
+        launcher = ["sudo"]
+    elif shutil.which("pkexec") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        launcher = ["pkexec"]
+    else:
         return False
-    except Exception as e:
-        tmp.unlink(missing_ok=True)
-        if verbose:
-            print(f"  Error: {e}")
+    try:
+        result = subprocess.run([*launcher, "bash", "-c", cmds], stdout=subprocess.DEVNULL)
+    except (FileNotFoundError, OSError):
         return False
+    return result.returncode == 0
+
+
+def _print_manual_linux_install(unit_content: str, frozen: bool) -> None:
+    """Explain how to finish the install by hand when no privilege path worked."""
+    import shlex
+
+    unit_path = _SYSTEMD_SYSTEM_DIR / _SYSTEMD_UNIT
+    print("  Could not get administrator rights (no sudo terminal or desktop prompt).")
+    # Not "sudo grid-inference-worker": as root the unit would run as root and
+    # look for root's config instead of this operator's.
+    print("  Install it by hand from this account:")
+    print()
+    if frozen:
+        src_bin = shlex.quote(str(Path(sys.executable).resolve()))
+        install_bin = _LINUX_INSTALL_DIR / "grid-inference-worker"
+        print(f"    sudo mkdir -p {shlex.quote(str(_LINUX_INSTALL_DIR))}")
+        print(f"    sudo install -m 755 {src_bin} {shlex.quote(str(install_bin))}")
+    print(f"    sudo tee {shlex.quote(str(unit_path))} >/dev/null <<'UNIT'")
+    print(unit_content.rstrip())
+    print("UNIT")
+    print("    sudo systemctl daemon-reload")
+    print(f"    sudo systemctl enable --now {_SERVICE_NAME}")
 
 
 def _linux_uninstall(verbose: bool = True) -> bool:
+    import shlex
     import subprocess
 
     system_unit = _SYSTEMD_SYSTEM_DIR / _SYSTEMD_UNIT
@@ -300,31 +331,21 @@ def _linux_uninstall(verbose: bool = True) -> bool:
         cmds = (
             f"systemctl stop {_SERVICE_NAME}; "
             f"systemctl disable {_SERVICE_NAME}; "
-            f"rm -f '{system_unit}'; "
-            f"rm -rf '{_LINUX_INSTALL_DIR}'; "
+            f"rm -f {shlex.quote(str(system_unit))}; "
+            f"rm -rf {shlex.quote(str(_LINUX_INSTALL_DIR))}; "
             f"systemctl daemon-reload"
         )
-        try:
-            if os.geteuid() == 0:
-                subprocess.run(["bash", "-c", cmds], capture_output=True)
-            else:
-                result = subprocess.run(["pkexec", "bash", "-c", cmds], capture_output=True)
-                if result.returncode != 0:
-                    if verbose:
-                        print("  Authentication cancelled or pkexec failed.")
-                    return False
+        if _run_privileged(cmds):
             if verbose:
                 print("  System service stopped and removed.")
             return True
-        except FileNotFoundError:
-            if verbose:
-                print("  pkexec not found. Remove with sudo instead:")
-                print(f"    sudo grid-inference-worker --uninstall-service")
-            return False
-        except Exception as e:
-            if verbose:
-                print(f"  Error: {e}")
-            return False
+        if verbose:
+            print("  Could not get administrator rights. Remove it manually:")
+            print(f"    sudo systemctl disable --now {_SERVICE_NAME}")
+            print(f"    sudo rm -f {shlex.quote(str(system_unit))}")
+            print(f"    sudo rm -rf {shlex.quote(str(_LINUX_INSTALL_DIR))}")
+            print("    sudo systemctl daemon-reload")
+        return False
 
     # Legacy: clean up old user services
     user_unit = _SYSTEMD_USER_DIR / _SYSTEMD_UNIT

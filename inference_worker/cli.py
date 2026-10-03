@@ -42,7 +42,9 @@ def _apply_cli_overrides(args):
         if not Settings.GRID_MODEL_NAME:
             Settings.GRID_MODEL_NAME = f"grid/{args.model}"
     if args.backend_url:
-        url = args.backend_url.rstrip("/")
+        url = args.backend_url.strip().rstrip("/")
+        if url.endswith("/v1"):
+            url = url[:-3]  # accept the OpenAI base users paste; probes and OPENAI_URL add it back
         try:
             import httpx
             r = httpx.get(f"{url}/api/version", timeout=2)
@@ -56,6 +58,16 @@ def _apply_cli_overrides(args):
             Settings.OPENAI_URL = url + "/v1"
     if args.worker_name:
         Settings.GRID_WORKER_NAME = args.worker_name
+
+
+def _concurrency(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a whole number") from None
+    if not 1 <= n <= 16:
+        raise argparse.ArgumentTypeError("must be between 1 and 16")
+    return n
 
 
 def _verify_runtime_dependencies() -> None:
@@ -89,6 +101,15 @@ def main():
                         help="Grid API key")
     parser.add_argument("--worker-name", metavar="NAME",
                         help="Worker name on the grid")
+    parser.add_argument("--setup", action="store_true",
+                        help="Set up in the terminal instead of the browser. With --backend-url it "
+                             "runs without prompts, reading the served model from the backend")
+    parser.add_argument("--concurrency", type=_concurrency, default=1, metavar="N",
+                        help="Parallel jobs for --setup (1-16; more than 1 needs --api-key)")
+    parser.add_argument("--grid-model", metavar="NAME",
+                        help="Model name shown on the grid for --setup (default: from the backend model)")
+    parser.add_argument("--backend-api-key", metavar="KEY",
+                        help="API key for the inference backend, if it requires one (--setup)")
     parser.add_argument("--port", type=int, default=7861, metavar="PORT",
                         help="Web dashboard port (default: 7861)")
     parser.add_argument(
@@ -98,7 +119,8 @@ def main():
         help="Dashboard bind host (default: loopback; 0.0.0.0 is an explicit LAN opt-in)",
     )
     parser.add_argument("--install-service", action="store_true",
-                        help="Install as a system service (systemd/launchd/Windows startup)")
+                        help="Install as a system service (systemd/launchd/Windows startup); "
+                             "with --setup, install it once setup succeeds")
     parser.add_argument("--uninstall-service", action="store_true",
                         help="Remove the system service")
     parser.add_argument("--service-status", action="store_true",
@@ -118,6 +140,34 @@ def main():
         print(f"http://localhost:{args.port}?token={ensure_dashboard_token()}")
         return
 
+    setup_done = False
+    if args.setup:
+        from . import headless
+        from .env_utils import reload_settings
+        try:
+            if args.backend_url:
+                config = headless.unattended_setup(
+                    backend_url=args.backend_url,
+                    model=args.model or "",
+                    api_key=args.api_key or "",
+                    worker_name=args.worker_name or "",
+                    grid_model=args.grid_model or "",
+                    concurrency=args.concurrency,
+                    backend_api_key=args.backend_api_key or "",
+                )
+            else:
+                config = headless.quick_setup()
+        except (headless.SetupError, RuntimeError) as exc:
+            print(f"  Setup failed: {exc}")
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("\n  Setup cancelled.")
+            sys.exit(1)
+        reload_settings(config)
+        if config.get("_service_installed"):
+            return
+        setup_done = True
+
     # Service commands (no worker, just install/remove/status)
     if args.service_status:
         from . import service
@@ -127,17 +177,18 @@ def main():
         from .env_utils import is_configured
         from . import service
         if not is_configured():
-            print("  Error: configure the worker first (run grid-inference-worker to set up).")
+            print("  Error: configure the worker first "
+                  "(grid-inference-worker --setup, or the browser setup).")
             sys.exit(1)
-        service.install(verbose=True)
-        return
+        sys.exit(0 if service.install(verbose=True) else 1)
     if args.uninstall_service:
         from . import service
         service.uninstall(verbose=True)
         return
 
-    # Apply CLI overrides
-    _apply_cli_overrides(args)
+    # Apply CLI overrides (setup already saved its own choices)
+    if not setup_done:
+        _apply_cli_overrides(args)
 
     host = args.host
     port = args.port
@@ -191,6 +242,12 @@ def main():
             ready.wait(timeout=30)
             logger.info(f"Dashboard: {url}")
             logger.info("Use --show-dashboard-link to copy access into another browser.")
+            from .env_utils import is_configured
+            if not is_configured() and not _has_display():
+                logger.info(
+                    "Not set up yet and no desktop here: run "
+                    "'grid-inference-worker --setup' to set up in this terminal."
+                )
             if _has_display():
                 webbrowser.open(auth_url)
             server_thread.join()
