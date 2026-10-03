@@ -24,8 +24,9 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   Ollama installation.
 - **Config / launch:** `config.py` (`Settings`, per-machine default worker name, stable config
   dir), `env_utils.py` (.env read/write + dashboard token), `cli.py` (argparse entry, GUI vs
-  console), `gui.py` (Tkinter window), `headless.py` (terminal quick-setup), `service.py`
-  (systemd / launchd / Windows-startup install).
+  console, `--setup`), `gui.py` (Tkinter window), `headless.py` (terminal setup: interactive
+  `quick_setup` and prompt-free `unattended_setup`), `service.py` (systemd / launchd /
+  Windows-startup install).
 - **Worker identity / enrollment:** `worker_identity.py` owns the funds-less rig
   signer, payout-wallet delegation verification, and capability-bound WS proof.
   `enrollment.py` owns the crash-resumable Console approval flow and installs an
@@ -68,7 +69,23 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
 - Grid resolves the payout wallet from the authenticated account. The legacy
   local `WALLET_ADDRESS` is not payout authority and must not be presented as such.
 - `service.py` uses `sys.executable` (not pip wrappers), `shlex.quote`s runtime paths, and
-  writes units via secure temp files — keep these invariants.
+  writes units via secure temp files — keep these invariants. Linux privilege order is root,
+  then `sudo` when stdin is a terminal (SSH), then `pkexec` only with a desktop session; if
+  none works it prints the unit and manual commands. Never advise running the installer
+  itself under `sudo`: the unit would run as root against root's config.
+- `--setup` is the headless onboarding path. With `--backend-url` it never prompts: it reads
+  the served model list, proves the model with a live completion, and writes the same config
+  as the browser wizard. One connection without `--api-key` uses Console approval; more than
+  one requires the advanced account key (same rule as the wizard).
+- Backend URLs are accepted with or without a trailing `/v1`.
+  `detect_backends.backend_base_url` strips it before probes append their own paths; stored
+  OpenAI-compatible URLs end in exactly one `/v1`.
+- Vision auto-detection runs once per (engine, URL, model) per process and is shared by
+  every parallel connection; only definitive results are cached. The nonce probe allows
+  reasoning models room (`VISION_PROBE_MAX_TOKENS`), requests `enable_thinking: false`
+  (retrying without it on a 400), and accepts the nonce from `content` or either reasoning
+  field (`reasoning`, `reasoning_content`) — reasoning text must contain the nonce as one
+  digit run.
 - `detect_backends.validated_backend_url` is the shared management-plane URL
   boundary. Preserve support for operator-owned loopback, LAN, and public
   backends while always rejecting cloud metadata and special-purpose targets.

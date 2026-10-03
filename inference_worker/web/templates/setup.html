@@ -1129,6 +1129,9 @@ function setupWizard() {
         d.checked = true;
         this.url_check = d;
         if (d.reachable) {
+          // The probe reports the server root (a pasted trailing /v1 removed);
+          // saving appends /v1 for OpenAI-compatible engines.
+          if (d.url) this.config.backend_url = d.url;
           this.config.engine = d.engine || '';
           this.config.engine_name = d.name || '';
           this.available_models = d.models || [];

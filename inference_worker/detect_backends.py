@@ -97,6 +97,17 @@ def validated_backend_url(value: str) -> str:
     normalized_path = parsed.path.rstrip("/")
     return urlunsplit((parsed.scheme, parsed.netloc, normalized_path, "", ""))
 
+
+def backend_base_url(value: str) -> str:
+    """Validate a backend URL and drop a trailing OpenAI ``/v1`` segment.
+
+    Operators paste either ``http://host:8000`` or ``http://host:8000/v1``.
+    Probes append their own paths (``/v1/models``, ``/api/tags``, ``/version``),
+    so they must start from the server root or ``/v1/v1/models`` 404s.
+    """
+    url = validated_backend_url(value)
+    return url[:-3] if url.endswith("/v1") else url
+
 # ── Known engines and their default ports / probe endpoints ──────────────
 
 KNOWN_ENGINES = [
@@ -375,7 +386,7 @@ async def check_backend_url(url: str, api_key: str = "") -> dict:
     """Probe a user-supplied URL and identify what engine is running.
     Returns dict with: reachable, engine, models, version, auth_required."""
     try:
-        url = validated_backend_url(url)
+        url = backend_base_url(url)
     except ValueError:
         return {
             "reachable": False,
@@ -386,7 +397,8 @@ async def check_backend_url(url: str, api_key: str = "") -> dict:
             "auth_required": False,
             "error": "Invalid backend URL",
         }
-    info = {"reachable": False, "engine": None, "name": None, "models": [], "version": None, "auth_required": False}
+    info = {"reachable": False, "engine": None, "name": None, "models": [], "version": None, "auth_required": False,
+            "url": url}
 
     headers = {}
     if api_key:
@@ -511,7 +523,7 @@ async def check_backend_url(url: str, api_key: str = "") -> dict:
 async def list_models_for_backend(url: str, engine: str = None, api_key: str = "") -> list:
     """List models for any backend at the given URL."""
     try:
-        url = validated_backend_url(url)
+        url = backend_base_url(url)
     except ValueError:
         return []
     headers = {}
@@ -590,7 +602,7 @@ async def get_model_context_length(url: str, engine: str = None, model_name: str
     """Try to detect the model's context length from the backend.
     Returns {"context_length": int} or {"context_length": null}."""
     try:
-        url = validated_backend_url(url)
+        url = backend_base_url(url)
     except ValueError:
         return {"context_length": None}
     ctx = None
@@ -659,7 +671,7 @@ async def get_model_context_length(url: str, engine: str = None, model_name: str
 async def pull_ollama_model(url: str, model_name: str) -> dict:
     """Pull a model in Ollama."""
     try:
-        url = validated_backend_url(url)
+        url = backend_base_url(url)
     except ValueError:
         return {"ok": False, "error": "Invalid backend URL"}
     try:

@@ -51,6 +51,133 @@ async def _authorize_grid_worker(worker_name: str) -> dict:
     raise RuntimeError("worker approval expired; run setup again to create a new link")
 
 
+class SetupError(RuntimeError):
+    """A terminal setup step failed; the message is safe to show the operator."""
+
+
+def _assemble_config(backends: list[dict], worker_name: str, credential_mode: str, api_key: str) -> dict:
+    """Build the .env dict shared by interactive and one-command setup."""
+    first_b = backends[0]
+    config = {
+        "GRID_WORKER_NAME": worker_name,
+        "GRID_BACKENDS": json.dumps(backends),
+        # Back-compat single-backend vars (also satisfy is_configured()).
+        "BACKEND_TYPE": first_b["type"],
+        "MODEL_NAME": first_b["model"],
+        "GRID_MODEL_NAME": first_b["grid_model"],
+    }
+    if credential_mode == "manual":
+        config["GRID_API_KEY"] = api_key
+    else:
+        config["GRID_ENROLLED_WORKER_NAME"] = worker_name
+    if first_b["type"] == "ollama":
+        config["OLLAMA_URL"] = first_b["url"]
+    else:
+        config["OPENAI_URL"] = first_b["url"]
+    if first_b["api_key"]:
+        config["OPENAI_API_KEY"] = first_b["api_key"]
+    return config
+
+
+def unattended_setup(
+    *,
+    backend_url: str,
+    model: str = "",
+    api_key: str = "",
+    worker_name: str = "",
+    grid_model: str = "",
+    concurrency: int = 1,
+    backend_api_key: str = "",
+) -> dict:
+    """One-command setup for a server: no prompts, no browser.
+
+    Reads the served model list from the backend (picks the only model when
+    there is exactly one), proves the model answers with a real completion,
+    and saves the same config the interactive setup writes. Context length is
+    not stored: the worker reads the backend's real limit each time it
+    connects. With no Grid API key, one connection uses the secure Console
+    approval link; parallel slots need an advanced account key.
+    """
+    from .config import default_worker_name
+    from .detect_backends import (
+        backend_base_url,
+        check_backend_url,
+        get_model_context_length,
+        list_models_for_backend,
+    )
+
+    try:
+        base_url = backend_base_url(backend_url)
+    except ValueError as exc:
+        raise SetupError(f"invalid backend URL ({exc})") from exc
+    if not 1 <= concurrency <= 16:
+        raise SetupError("concurrency must be between 1 and 16")
+    if concurrency > 1 and not api_key:
+        raise SetupError(
+            "parallel slots need an advanced account API key (--api-key); "
+            "Console sign-in currently allows one connection per worker"
+        )
+
+    print(f"  Checking {base_url}…", end=" ", flush=True)
+    info = asyncio.run(check_backend_url(base_url, api_key=backend_api_key))
+    if info.get("auth_required"):
+        print("auth required.")
+        raise SetupError("the backend requires an API key; pass --backend-api-key")
+    if not info.get("reachable"):
+        print("no answer.")
+        raise SetupError(f"no inference server answered at {base_url}")
+    engine = info.get("engine") or "openai-compat"
+    print(f"{info.get('name') or 'OpenAI-compatible'}.")
+    models = info.get("models") or asyncio.run(
+        list_models_for_backend(base_url, engine, api_key=backend_api_key)
+    )
+    if not model:
+        if len(models) == 1:
+            model = models[0]
+        elif not models:
+            raise SetupError("the backend lists no models; pass --model")
+        else:
+            shown = ", ".join(models[:10]) + (" …" if len(models) > 10 else "")
+            raise SetupError(f"the backend serves several models; choose one with --model ({shown})")
+    elif models and model not in models:
+        raise SetupError(f"model {model!r} is not served here ({', '.join(models[:10])})")
+
+    print(f"  Validating {model}…", end=" ", flush=True)
+    ok, msg = _validate_backend(base_url, engine, model, backend_api_key)
+    if not ok:
+        print("failed.")
+        raise SetupError(f"test completion failed: {msg}")
+    print("ok.")
+    context = asyncio.run(
+        get_model_context_length(base_url, engine, model, api_key=backend_api_key)
+    ).get("context_length")
+
+    backend_type = "ollama" if engine == "ollama" else "openai"
+    worker_name = worker_name or default_worker_name()
+    entry = {
+        "type": backend_type,
+        "url": base_url if backend_type == "ollama" else base_url + "/v1",
+        "api_key": backend_api_key,
+        "model": model,
+        "grid_model": grid_model or _slug(model),
+        "concurrency": concurrency,
+    }
+
+    credential_mode = "manual" if api_key else "console"
+    if credential_mode == "console":
+        asyncio.run(_authorize_grid_worker(worker_name))
+        entry["name"] = worker_name
+
+    config = _assemble_config([entry], worker_name, credential_mode, api_key)
+    write_env(config)
+    print()
+    print(f"  Worker:   {worker_name}")
+    print(f"  Model:    {model} → {entry['grid_model']} (x{concurrency})")
+    print(f"  Context:  {context if context else 'read from the backend when connecting'}")
+    print(f"  Saved to {ENV_PATH}")
+    return config
+
+
 def _slug(s: str) -> str:
     import re
     return re.sub(r"[^A-Za-z0-9.]+", "-", s).strip("-").lower()[:32] or "model"
@@ -287,26 +414,7 @@ def quick_setup() -> dict:
     print()
     print("  Connection: streaming WebSocket")
 
-    # --- Assemble config ---
-    first_b = backends[0]
-    config = {
-        "GRID_WORKER_NAME": worker_name,
-        "GRID_BACKENDS": json.dumps(backends),
-        # Back-compat single-backend vars (also satisfy is_configured()).
-        "BACKEND_TYPE": first_b["type"],
-        "MODEL_NAME": first_b["model"],
-        "GRID_MODEL_NAME": first_b["grid_model"],
-    }
-    if credential_mode == "manual":
-        config["GRID_API_KEY"] = api_key
-    else:
-        config["GRID_ENROLLED_WORKER_NAME"] = worker_name
-    if first_b["type"] == "ollama":
-        config["OLLAMA_URL"] = first_b["url"]
-    else:
-        config["OPENAI_URL"] = first_b["url"]
-    if first_b["api_key"]:
-        config["OPENAI_API_KEY"] = first_b["api_key"]
+    config = _assemble_config(backends, worker_name, credential_mode, api_key)
 
     # --- Summary ---
     print()
@@ -338,30 +446,11 @@ def quick_setup() -> dict:
 
 def run(args):
     """Run worker in headless mode (no GUI, no web server)."""
-    # Apply CLI flag overrides
-    if args.api_key:
-        Settings.GRID_API_KEY = args.api_key
-    if args.model:
-        Settings.MODEL_NAME = args.model
-        if not Settings.GRID_MODEL_NAME:
-            Settings.GRID_MODEL_NAME = f"grid/{args.model}"
-    if args.backend_url:
-        url = args.backend_url.rstrip("/")
-        try:
-            import httpx
-            r = httpx.get(f"{url}/api/version", timeout=2)
-            if r.status_code == 200:
-                Settings.BACKEND_TYPE = "ollama"
-                Settings.OLLAMA_URL = url
-            else:
-                raise Exception()
-        except Exception:
-            Settings.BACKEND_TYPE = "openai"
-            Settings.OPENAI_URL = url + "/v1"
-    if args.worker_name:
-        Settings.GRID_WORKER_NAME = args.worker_name
+    from .cli import _apply_cli_overrides
+
+    _apply_cli_overrides(args)
     if not is_configured():
-        if args.no_setup:
+        if getattr(args, "no_setup", False):
             print("Error: GRID_API_KEY and MODEL_NAME are required.")
             print("Set them via env vars, .env, or CLI flags. Run without --no-setup for interactive setup.")
             sys.exit(1)

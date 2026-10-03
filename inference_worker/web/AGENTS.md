@@ -39,7 +39,9 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 - Operator-supplied backend URLs may target loopback, private LAN, or public
   inference services, but must pass `validated_backend_url` before probing or
   persistence. Cloud metadata, link-local, multicast, reserved, credentialed,
-  query-bearing, and malformed targets are forbidden.
+  query-bearing, and malformed targets are forbidden. `/api/setup/check-url`
+  returns the server-root `url` (pasted trailing `/v1` removed); the wizard
+  adopts it so saving appends exactly one `/v1`.
 - Management APIs return stable error classes rather than raw exceptions or
   backend bodies. Settings validation exposes only explicitly authored public
   messages; wrapped URL/library exceptions never become response text.
