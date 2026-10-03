@@ -71,8 +71,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `docs/release-notes-v0.3.9.md` records exact tagged Linux production
   qualification, the required deployed Core label/budget fixes, platform trust
   limits, and the separate incidental test-worker accounting reconciliation.
-- `docs/release-notes-v0.3.10.md` — headless setup/vision candidate; its
-  qualification section must be filled before the draft is published.
+- `docs/release-notes-v0.3.10.md` records the headless-setup/vision release and
+  the limits of its operator-source qualification.
 - `tests/` — pytest smoke tests.
 
 ## Local Contracts
