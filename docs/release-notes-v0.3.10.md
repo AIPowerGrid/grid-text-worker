@@ -25,12 +25,27 @@ accounting, and payout settlement are unchanged from v0.3.9.
   model can no longer advertise mixed text-only and vision capability.
 - **LM Studio** context limits come from the loaded model instance rather than
   the catalog entry (#39).
+- **Taken dashboard port.** In console mode the worker now exits with a clear
+  error and a suggested `--port` when port 7861 is already used (for example by
+  a second worker on the same machine), instead of stopping silently. The
+  desktop window still opens the running dashboard. Output is line-buffered so
+  setup messages print in order under pipes and journald (#42).
 
 ## Release Qualification
 
-Not yet qualified. CI builds and verifies the four-platform payload for the
-tagged commit; supervised production qualification must be recorded here
-before publication.
+- Source: `main` after #42, tagged `v0.3.10`. CI ran the Python suite on
+  3.11–3.13 and the browser-script tests, built all four platforms, and
+  assembled verified checksums, manifest, SBOM, and provenance.
+- An operator ran the release source on a 2× RTX PRO 6000 host with vLLM
+  serving a reasoning model at 256K context and 8 parallel slots. Before these
+  fixes it was serving real Grid jobs as a systemd service; that run surfaced
+  the defects fixed here. With the release source, prompt-free `--setup`
+  detected vLLM, validated the model with a live completion and saved the
+  configuration; a second worker on the same host exited with the new port
+  error.
+- Not covered: the frozen release binaries themselves were not separately
+  re-run on that host before publication, Console-approval setup was not
+  repeated, and Windows/macOS have CI build/runtime checks only.
 
 ## Platform Trust
 
