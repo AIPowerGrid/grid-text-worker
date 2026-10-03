@@ -27,7 +27,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   preservation of validator protocol fields in structured backend requests.
 - `test_headless_setup.py` - headless-server onboarding: shared vision verdict
   across parallel slots, reasoning-field nonce matching, trailing-`/v1` URLs,
-  prompt-free `--setup`, and Linux service privilege fallback. Mocked HTTP and
+  prompt-free `--setup`, Linux service privilege fallback, the taken-dashboard-port
+  exit, and line-buffered console output. Mocked HTTP and
   subprocess only; not a live vLLM or systemd test.
 - `test_enrollment.py` - Console device enrollment, private pending-state
   persistence, delegation verification, and capability-bound registration.
