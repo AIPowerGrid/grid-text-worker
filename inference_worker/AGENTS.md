@@ -77,6 +77,10 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   the served model list, proves the model with a live completion, and writes the same config
   as the browser wizard. One connection without `--api-key` uses Console approval; more than
   one requires the advanced account key (same rule as the wizard).
+- The worker runs inside the dashboard app. In console mode `cli.main` checks the dashboard
+  port before starting and exits 1 with a `--port` hint when it is taken (e.g. a second
+  worker on the host); the desktop window still opens the already-running dashboard.
+  `cli.main` line-buffers stdout/stderr so setup output stays ordered in pipes and journals.
 - Backend URLs are accepted with or without a trailing `/v1`.
   `detect_backends.backend_base_url` strips it before probes append their own paths; stored
   OpenAI-compatible URLs end in exactly one `/v1`.

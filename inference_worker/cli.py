@@ -3,6 +3,7 @@
 import argparse
 import logging
 import os
+import socket
 import sys
 import threading
 import webbrowser
@@ -19,6 +20,32 @@ def _setup_logging():
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+
+def _line_buffer_output() -> None:
+    """Keep print() output in order with log lines when stdout is a pipe or journal."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (OSError, ValueError):
+            pass
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """True when the dashboard address is already bound by another process."""
+    bind_host = "127.0.0.1" if host == "localhost" else host
+    family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        if sys.platform != "win32":
+            # Match uvicorn, so a TIME_WAIT socket from a just-restarted worker is not "in use".
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((bind_host, port))
+        except OSError:
+            return True
+    return False
 
 
 def _has_display() -> bool:
@@ -130,6 +157,7 @@ def main():
     parser.add_argument("--verify-runtime", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
+    _line_buffer_output()
     _setup_logging()
 
     if args.verify_runtime:
@@ -194,6 +222,20 @@ def main():
     port = args.port
     url = f"http://localhost:{port}"
 
+    # Binaries default to GUI, pip install defaults to console
+    frozen = getattr(sys, "frozen", False)
+    show_gui = (frozen or args.gui) and not args.no_gui and _has_display()
+
+    # The worker runs inside the dashboard app, so in console mode a taken port would stop
+    # it silently (and the readiness probe would find the other process's dashboard instead).
+    # The desktop window keeps opening the already-running dashboard, as before.
+    if not show_gui and _port_in_use(host, port):
+        print(f"  Error: dashboard port {port} is already in use, most likely by another "
+              f"worker on this machine.", file=sys.stderr)
+        print(f"  Start this worker on a free port: grid-inference-worker --port {port + 1}",
+              file=sys.stderr)
+        sys.exit(1)
+
     # Ensure dashboard auth token exists before the server starts
     from .env_utils import ensure_dashboard_token
     token = ensure_dashboard_token()
@@ -227,10 +269,6 @@ def main():
                 time.sleep(0.5)
 
     threading.Thread(target=wait_for_server, daemon=True).start()
-
-    # Binaries default to GUI, pip install defaults to console
-    frozen = getattr(sys, "frozen", False)
-    show_gui = (frozen or args.gui) and not args.no_gui and _has_display()
 
     if show_gui:
         from . import gui

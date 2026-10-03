@@ -277,3 +277,63 @@ def test_failed_privileges_print_manual_unit(monkeypatch, capsys):
     assert "[Service]" in out and "ExecStart=" in out
     assert "systemctl enable --now grid-inference-worker" in out
     assert "sudo grid-inference-worker" not in out
+
+
+# ── Dashboard port and console output ────────────────────────────────────
+
+
+def test_port_in_use_detects_a_bound_listener():
+    import socket
+
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        assert cli._port_in_use("127.0.0.1", port)
+        assert cli._port_in_use("localhost", port)
+    assert not cli._port_in_use("127.0.0.1", port)
+
+
+def test_taken_dashboard_port_exits_with_guidance(monkeypatch, capsys):
+    started = []
+    monkeypatch.setattr("sys.argv", ["grid-inference-worker", "--no-gui", "--port", "7861"])
+    monkeypatch.setattr(cli, "_port_in_use", lambda host, port: True)
+    monkeypatch.setattr(cli.threading, "Thread", lambda *a, **kw: started.append(kw))
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+    assert exit_info.value.code == 1
+    assert not started, "the dashboard/worker must not start on a taken port"
+    err = capsys.readouterr().err
+    assert "port 7861 is already in use" in err and "--port 7862" in err
+
+
+def test_desktop_window_still_opens_existing_dashboard_on_taken_port(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    opened = []
+    fake_gui = ModuleType("inference_worker.gui")
+    fake_gui.run = lambda url, auth_url, ready: opened.append(url)
+    monkeypatch.setitem(sys.modules, "inference_worker.gui", fake_gui)
+    monkeypatch.setattr("inference_worker.gui", fake_gui, raising=False)
+    monkeypatch.setattr("sys.argv", ["grid-inference-worker", "--gui"])
+    monkeypatch.setattr(cli, "_has_display", lambda: True)
+    monkeypatch.setattr(cli, "_port_in_use", lambda host, port: True)
+    monkeypatch.setattr(cli.threading, "Thread", lambda *a, **kw: SimpleNamespace(start=lambda: None))
+    cli.main()
+    assert opened == ["http://localhost:7861"]
+
+
+def test_output_is_line_buffered_for_pipes(monkeypatch):
+    class Stream:
+        def __init__(self):
+            self.kwargs = None
+
+        def reconfigure(self, **kwargs):
+            self.kwargs = kwargs
+
+    out, err = Stream(), Stream()
+    monkeypatch.setattr("sys.stdout", out)
+    monkeypatch.setattr("sys.stderr", err)
+    cli._line_buffer_output()
+    assert out.kwargs == {"line_buffering": True} == err.kwargs
