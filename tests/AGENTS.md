@@ -30,6 +30,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   prompt-free `--setup`, Linux service privilege fallback, the taken-dashboard-port
   exit, and line-buffered console output. Mocked HTTP and
   subprocess only; not a live vLLM or systemd test.
+  Console browser-launch coverage keeps `--no-browser` independent of GUI and
+  dashboard authentication.
 - `test_enrollment.py` - Console device enrollment, private pending-state
   persistence, delegation verification, and capability-bound registration.
 - `test_operator_reliability.py` - generation read-timeout classification across
@@ -47,6 +49,10 @@ does not currently prove a live backend-to-Grid job lifecycle.
   preservation, endpoint-bound secret retention, and detected-context caps.
 - `test_bundled_ca.py` - public CA inclusion checks for onefile and onedir
   layouts; requires the build extra. The release CI also checks actual binaries.
+- `test_lifecycle_verifier.py` - native rehearsal child-environment isolation;
+  host credentials, proxies and Python paths cannot enter the synthetic worker.
+  Cleanup targets only the owned PID/tree and never signals an already-exited PID.
+  The separate release workflow runs the actual packaged lifecycle rehearsal.
 - `onboarding-ui.test.mjs` - Node built-in tests of the actual template scripts:
   bounded setup polling, rejection, unavailable status, required Console
   connectivity canary, advanced registration-only mode, and account links.

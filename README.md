@@ -171,6 +171,7 @@ grid-inference-worker \
 --host HOST             Dashboard bind host (default: 127.0.0.1)
 --gui                   Show the desktop control window (default for binaries)
 --no-gui                Skip the desktop control window
+--no-browser            Do not automatically open the dashboard in a browser
 --install-service       Install as a system service (auto-start on boot; after --setup)
 --uninstall-service     Remove the system service
 --service-status        Check if the service is installed

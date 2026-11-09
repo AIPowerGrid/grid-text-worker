@@ -120,6 +120,8 @@ def main():
                         help="Show the desktop control window (default for binaries)")
     parser.add_argument("--no-gui", action="store_true",
                         help="Skip the desktop control window (default for pip install)")
+    parser.add_argument("--no-browser", action="store_true",
+                        help="Do not automatically open the dashboard in a browser")
     parser.add_argument("--model", metavar="NAME",
                         help="Model name (e.g. llama3.2:3b)")
     parser.add_argument("--backend-url", metavar="URL",
@@ -286,7 +288,7 @@ def main():
                     "Not set up yet and no desktop here: run "
                     "'grid-inference-worker --setup' to set up in this terminal."
                 )
-            if _has_display():
+            if _has_display() and not args.no_browser:
                 webbrowser.open(auth_url)
             server_thread.join()
         except KeyboardInterrupt:

@@ -156,6 +156,15 @@ jobs:
             echo "Sensitive or operational material is present in the bundle" >&2
             exit 1
           fi
+      - name: Verify frozen local job lifecycle
+        shell: bash
+        env:
+          BINARY: ${{ matrix.binary }}
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            BINARY=dist/grid-inference-worker.app/Contents/MacOS/grid-inference-worker
+          fi
+          uv run --frozen --extra build --extra test python scripts/verify-worker-lifecycle.py --binary "$BINARY"
       - name: Stage release artifact
         shell: bash
         env:
