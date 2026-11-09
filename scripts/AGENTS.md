@@ -42,6 +42,8 @@ and generated icon or splash assets for the distributable text worker.
   contacts Core or a real model. Publish only safe summary counters, not child
   logs, configuration or signing state. Synthetic peers do not qualify live
   Core cancellation forwarding, GPU prefill, enrollment, billing or payouts.
+  Windows cleanup must stop the owned one-file bootloader's child tree, not just
+  its parent PID, before deleting private state. Never target processes by name.
 
 ## Work Guidance
 

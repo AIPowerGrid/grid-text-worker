@@ -223,6 +223,27 @@ def child_environment(home: Path, http_port: int, ws_port: int) -> dict[str, str
     return env
 
 
+def stop_child(process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        if sys.platform == "win32":
+            # The one-file bootloader owns a separate application child. Stop
+            # this PID's tree before deleting its private home and locked log.
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        else:
+            process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
 async def verify(command: list[str], frozen: bool) -> dict:
     state = Backend()
     backend = ThreadingHTTPServer(("127.0.0.1", 0), handler_type(state))
@@ -285,6 +306,9 @@ async def verify(command: list[str], frozen: bool) -> dict:
                         "cancel_closed_http": True,
                     }
                 )
+                print(
+                    json.dumps({"event": "protocol_passed", **results[-1]}), flush=True
+                )
             if not complete.done():
                 complete.set_result(True)
         except Exception as exc:
@@ -342,13 +366,7 @@ async def verify(command: list[str], frozen: bool) -> dict:
                                 "dashboard accepted unauthenticated request"
                             )
                     finally:
-                        if process.poll() is None:
-                            process.terminate()
-                        try:
-                            await asyncio.to_thread(process.wait, 10)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            await asyncio.to_thread(process.wait, 5)
+                        await asyncio.to_thread(stop_child, process)
     finally:
         backend.shutdown()
         backend.server_close()

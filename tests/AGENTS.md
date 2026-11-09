@@ -51,6 +51,7 @@ does not currently prove a live backend-to-Grid job lifecycle.
   layouts; requires the build extra. The release CI also checks actual binaries.
 - `test_lifecycle_verifier.py` - native rehearsal child-environment isolation;
   host credentials, proxies and Python paths cannot enter the synthetic worker.
+  Cleanup targets only the owned PID/tree and never signals an already-exited PID.
   The separate release workflow runs the actual packaged lifecycle rehearsal.
 - `onboarding-ui.test.mjs` - Node built-in tests of the actual template scripts:
   bounded setup polling, rejection, unavailable status, required Console
