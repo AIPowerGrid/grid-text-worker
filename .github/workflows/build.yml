@@ -156,15 +156,6 @@ jobs:
             echo "Sensitive or operational material is present in the bundle" >&2
             exit 1
           fi
-      - name: Verify frozen local job lifecycle
-        shell: bash
-        env:
-          BINARY: ${{ matrix.binary }}
-        run: |
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            BINARY=dist/grid-inference-worker.app/Contents/MacOS/grid-inference-worker
-          fi
-          uv run --frozen --extra build --extra test python scripts/verify-worker-lifecycle.py --binary "$BINARY"
       - name: Stage release artifact
         shell: bash
         env:
@@ -173,13 +164,24 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             mv dist/grid-inference-worker.app "dist/Grid Inference Worker.app"
-            (
-              cd dist
-              python -m zipfile -c grid-inference-worker-macos-arm64.zip "Grid Inference Worker.app"
-            )
+            codesign --verify --deep --strict "dist/Grid Inference Worker.app"
+            ditto -c -k --keepParent "dist/Grid Inference Worker.app" "$RELEASE_FILE"
+            mkdir -p dist/archive-roundtrip
+            ditto -x -k "$RELEASE_FILE" dist/archive-roundtrip
+            codesign --verify --deep --strict "dist/archive-roundtrip/Grid Inference Worker.app"
           else
             cp "$BINARY" "$RELEASE_FILE"
           fi
+      - name: Verify staged native job lifecycle
+        shell: bash
+        env:
+          RELEASE_FILE: ${{ matrix.release_file }}
+        run: |
+          BINARY="$RELEASE_FILE"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            BINARY="dist/archive-roundtrip/Grid Inference Worker.app/Contents/MacOS/grid-inference-worker"
+          fi
+          uv run --frozen --extra build --extra test python scripts/verify-worker-lifecycle.py --binary "$BINARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: grid-inference-worker-${{ matrix.target }}

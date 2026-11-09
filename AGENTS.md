@@ -48,7 +48,8 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 - `inference_worker/` — the worker package: grid transport, backend bridge, config,
   detection, service install, CLI/GUI. Owned in its own AGENTS.md.
 - `run_worker.py` / `run_frozen.py` — thin launchers (dev / PyInstaller entry).
-- `scripts/`, `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build (no DOX child).
+- `scripts/` — native packaging and release qualification; owned in `scripts/AGENTS.md`.
+- `*.spec`, `Dockerfile`, `docker-compose.yml` — packaging/build.
 - `scripts/install-worker.sh` — release-stamped, checksum-verifying Linux
   installer. It installs the immutable x64/ARM64 binary without executing it,
   collecting credentials, or changing worker configuration.
@@ -149,6 +150,6 @@ setup wizard + dashboard at `http://localhost:7861`. Console script: `grid-infer
 ## Child DOX Index
 
 - [inference_worker/AGENTS.md](inference_worker/AGENTS.md) — the worker package (transport, backend bridge, CLI/GUI, service).
-- [scripts/AGENTS.md](scripts/AGENTS.md) — Windows packaging and generated
-  installer artwork helpers.
+- [scripts/AGENTS.md](scripts/AGENTS.md) — native packaging, release qualification
+  and generated installer artwork helpers.
 - [tests/AGENTS.md](tests/AGENTS.md) — current pure/smoke test boundary.

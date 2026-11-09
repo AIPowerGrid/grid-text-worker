@@ -90,6 +90,17 @@ def test_complete_release_payload_verifies(tmp_path: Path) -> None:
     release_verifier.verify(tmp_path)
 
 
+def test_macos_download_is_verified_after_symlink_preserving_packaging() -> None:
+    workflow = (Path(__file__).parents[1] / ".github/workflows/build.yml").read_text()
+    assert "python -m zipfile -c" not in workflow
+    assert 'ditto -c -k --keepParent "dist/Grid Inference Worker.app" "$RELEASE_FILE"' in workflow
+    assert 'ditto -x -k "$RELEASE_FILE" dist/archive-roundtrip' in workflow
+    assert 'codesign --verify --deep --strict "dist/archive-roundtrip/Grid Inference Worker.app"' in workflow
+    assert 'BINARY="dist/archive-roundtrip/Grid Inference Worker.app/Contents/MacOS/grid-inference-worker"' in workflow
+    assert workflow.index("Stage release artifact") < workflow.index("Verify staged native job lifecycle")
+    assert workflow.index("Verify staged native job lifecycle") < workflow.index("- uses: actions/upload-artifact")
+
+
 def test_tampered_binary_is_rejected(tmp_path: Path) -> None:
     _write_payload(tmp_path)
     (tmp_path / "grid-inference-worker-linux-x64").write_bytes(b"\x7fELF-tampered")
