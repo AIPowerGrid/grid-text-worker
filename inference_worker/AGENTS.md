@@ -106,6 +106,9 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   port before starting and exits 1 with a `--port` hint when it is taken (e.g. a second
   worker on the host); the desktop window still opens the already-running dashboard.
   `cli.main` line-buffers stdout/stderr so setup output stays ordered in pipes and journals.
+- `--no-browser` suppresses automatic dashboard browser launch in console mode;
+  use it with `--no-gui` for unattended native qualification. It does not bypass
+  dashboard authentication or change the default loopback bind.
 - Backend URLs are accepted with or without a trailing `/v1`.
   `detect_backends.backend_base_url` strips it before probes append their own paths; stored
   OpenAI-compatible URLs end in exactly one `/v1`.

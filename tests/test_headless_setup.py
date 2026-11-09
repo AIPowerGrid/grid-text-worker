@@ -337,3 +337,28 @@ def test_output_is_line_buffered_for_pipes(monkeypatch):
     monkeypatch.setattr("sys.stderr", err)
     cli._line_buffer_output()
     assert out.kwargs == {"line_buffering": True} == err.kwargs
+
+
+@pytest.mark.parametrize("suppress_browser", [False, True])
+def test_console_browser_launch_can_be_disabled(monkeypatch, suppress_browser):
+    from inference_worker import env_utils
+
+    opened = []
+    arguments = ["grid-inference-worker", "--no-gui"]
+    if suppress_browser:
+        arguments.append("--no-browser")
+    monkeypatch.setattr("sys.argv", arguments)
+    monkeypatch.setattr(cli, "_has_display", lambda: True)
+    monkeypatch.setattr(cli, "_port_in_use", lambda *_args: False)
+    monkeypatch.setattr(cli, "_apply_cli_overrides", lambda _args: None)
+    monkeypatch.setattr(env_utils, "is_configured", lambda: True)
+    monkeypatch.setattr(env_utils, "ensure_dashboard_token", lambda: "local-fixture-session")
+    monkeypatch.setattr(cli.webbrowser, "open", opened.append)
+    monkeypatch.setattr(cli.threading, "Thread", lambda *a, **kw: SimpleNamespace(
+        start=lambda: None, join=lambda: None,
+    ))
+    monkeypatch.setattr(cli.threading, "Event", lambda: SimpleNamespace(wait=lambda **kw: True))
+
+    cli.main()
+
+    assert bool(opened) is not suppress_browser
