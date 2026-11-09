@@ -1,5 +1,9 @@
 # Grid Text Worker v0.3.11
 
+Unpublished candidate only. Downloaded-archive staging found flattened macOS
+framework symlinks that invalidate the app bundle. The tag and failed-candidate
+evidence are preserved; use the corrected v0.3.12 release instead.
+
 ## Operator fixes
 
 - Long prefill no longer hits the old 120-second worker read timeout. The default

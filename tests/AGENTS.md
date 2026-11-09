@@ -19,6 +19,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
   frozen-runtime dependency checks.
 - `test_release_assets.py` - offline release payload, checksum, and archive
   safety verification, including exact installer/release identity.
+  The workflow contract requires symlink-preserving macOS packing, post-extraction
+  bundle integrity and the actual staged-artifact lifecycle test before upload.
 - `test_linux_installer.py` - mocked-host Linux install, checksum-tamper
   rejection, executable permissions, and proof that installation never starts
   the worker.

@@ -50,6 +50,11 @@ and generated icon or splash assets for the distributable text worker.
 - Treat Windows quoting, path, architecture, and code-signing behavior as part
   of the release contract.
 - Update release docs and workflow asset names with packaging changes.
+- macOS app ZIPs must preserve framework symlinks (`ditto --keepParent`), then
+  be extracted into a fresh directory. Verify ad-hoc signature integrity before
+  and after packing, and run the native lifecycle test on that extracted app.
+  A working executable before ZIP creation does not qualify the download.
+  Integrity verification is not Developer ID signing or notarization.
 
 ## Verification
 
