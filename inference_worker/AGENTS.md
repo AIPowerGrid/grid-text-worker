@@ -66,6 +66,16 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   A read timeout fails the job but only marks the backend unavailable when its
   health probe also fails. Core/client deadlines and retry/accounting policy
   are unchanged. Restart the worker to apply edited timeout settings.
+- Each job's backend operation and WebSocket cancel reader are owned and awaited
+  together. Stop the reader and finish backend cleanup before sending any
+  terminal result, including HTTP rejections and timeouts; Core may dispatch the
+  next job immediately. A received matching cancel aborts pending HTTP work
+  before headers or during silent reads and preserves only observed partial
+  output/usage. Worker shutdown propagates cancellation, not a fabricated result.
+  This does not guarantee how quickly Core forwards a client's cancellation.
+- Unexpected assignments during active work or reader loss fail the connection
+  so Core can recover its claim. Acks use task-local timeout scopes so Python
+  3.11 shutdown cannot be swallowed by an ack-completion race.
 - An expired pending Console enrollment may be replaced for a new worker name;
   an unexpired enrollment still requires exact API/name matching or explicit
   restart. Never alter the stored signer to recover a pending request.

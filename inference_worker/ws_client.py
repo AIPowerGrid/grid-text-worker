@@ -13,7 +13,9 @@ import logging
 import os
 import ssl
 import time
+from collections.abc import Coroutine
 from datetime import datetime
+from typing import Any
 
 import httpx
 import websockets
@@ -109,6 +111,15 @@ class BackendUnavailable(ConnectionError):
     empty results (the failure mode that silently halved the grid's chat
     throughput on 2026-06-14).
     """
+
+
+class _BackendHTTPError(Exception):
+    """Defer a backend rejection until the per-job reader is stopped."""
+
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(f"backend HTTP {status_code}")
 
 
 class StreamingWorker:
@@ -578,6 +589,22 @@ class StreamingWorker:
         if not await self._backend_healthy():
             raise BackendUnavailable("backend unhealthy after ReadTimeout")
 
+    @staticmethod
+    async def _check_backend_response(response: httpx.Response) -> None:
+        if response.status_code != 200:
+            body = await response.aread()
+            raise _BackendHTTPError(response.status_code, body.decode("utf-8", "replace")[:500])
+
+    async def _report_backend_http_error(self, job_id: str, error: _BackendHTTPError) -> None:
+        if 400 <= error.status_code < 500:
+            await self._fail_job(
+                job_id, f"backend rejected request (HTTP {error.status_code}): {error.detail}",
+                client_error=True,
+            )
+            return
+        await self._fail_job(job_id, f"backend returned HTTP {error.status_code}")
+        raise BackendUnavailable(f"backend HTTP {error.status_code}")
+
     async def _detect_vision(self) -> bool:
         """Return True if this backend's model accepts image input.
 
@@ -717,19 +744,18 @@ class StreamingWorker:
             openai_payload.setdefault("reasoning_effort", Settings.REASONING_EFFORT)
         return openai_payload, faithful
 
-    def _start_cancel_watcher(self, job_id: str, cancel_event: asyncio.Event):
+    def _start_cancel_watcher(self, job_id: str, cancel_event: asyncio.Event) -> asyncio.Task[None]:
         """Watch the WS for a `cancel` frame WHILE we stream a job back.
 
         During generation the job coroutine only SENDS (tokens), so a second
         coroutine can safely RECV here without colliding (full-duplex; the only
         other reader, the message loop, is parked awaiting this job). When the
-        grid forwards a client cancel we set `cancel_event`; the streaming loop
-        breaks, which closes our HTTP connection to the backend and makes the
-        inference engine (vLLM/sglang/Ollama) abort the request and free the GPU.
+        grid forwards a client cancel we set `cancel_event`; the operation runner
+        cancels the pending backend task, including pre-header and silent waits.
 
         The caller MUST cancel + await this task before reading the job's ack, so
         the watcher never steals the ack frame."""
-        async def _watch():
+        async def _watch() -> None:
             try:
                 while not cancel_event.is_set():
                     raw = await self.ws.recv()
@@ -738,12 +764,43 @@ class StreamingWorker:
                         logger.info(f"🛑 cancel for {job_id[:8]} — aborting backend request")
                         cancel_event.set()
                         return
+                    if m.get("type") == "job":
+                        # Never silently discard an unexpected assignment. A
+                        # disconnect lets Core recover its outstanding claim.
+                        return
                     # The grid shouldn't send anything else mid-job; ignore it.
             except asyncio.CancelledError:
                 raise
             except Exception:
                 return  # any WS issue is surfaced on the main job path
         return asyncio.create_task(_watch())
+
+    async def _run_backend_operation(self, job_id: str, operation: Coroutine[Any, Any, None]) -> bool:
+        """Return whether Grid cancelled; stop all per-job tasks before returning.
+
+        Only the operation relays nonterminal output. Its caller sends terminal
+        results after this runner has relinquished the WebSocket reader.
+        """
+        cancel_event = asyncio.Event()
+        backend_task = asyncio.create_task(operation)
+        watcher = self._start_cancel_watcher(job_id, cancel_event)
+        cancelled = asyncio.create_task(cancel_event.wait())
+        tasks = (backend_task, watcher, cancelled)
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            if cancel_event.is_set():
+                backend_task.cancel()
+                await asyncio.gather(backend_task, return_exceptions=True)
+                return True
+            if watcher.done():
+                raise ConnectionError("Grid connection ended during backend generation")
+            await backend_task
+            return False
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _handle_job(self, job: dict):
         """Process a job: stream inference deltas back to the grid faithfully."""
@@ -775,44 +832,13 @@ class StreamingWorker:
         last_finish = None
         start_time = time.time()
 
-        cancelled = False
-        cancel_event = asyncio.Event()
-        watcher = self._start_cancel_watcher(job_id, cancel_event)
-        try:
+        async def generate() -> None:
+            nonlocal full_text, full_reasoning, token_count, usage, last_finish
             # Stream from the inference engine → relay deltas to the grid.
             async with self.backend.stream("POST", url, json=openai_payload, headers=headers) as response:
-                if response.status_code != 200:
-                    body = await response.aread()
-                    detail = body.decode("utf-8", "replace")[:500]
-                    logger.warning(f"Backend HTTP {response.status_code} for {job_id[:8]}: {detail[:200]}")
-                    if 400 <= response.status_code < 500:
-                        # CLIENT error (bad params / malformed tool schema / context
-                        # too long). Now that we forward the request faithfully, the
-                        # backend can reject it for reasons that are the CALLER's
-                        # fault — not a backend-health problem. Fail just THIS job
-                        # and surface the real reason; do NOT take ourselves offline
-                        # (that would let one bad request knock the worker off the
-                        # grid for everyone) and do NOT requeue (it would fail
-                        # identically on every worker).
-                        await self._fail_job(
-                            job_id,
-                            f"backend rejected request (HTTP {response.status_code}): {detail}",
-                            client_error=True,
-                        )
-                        return
-                    # 5xx / unexpected — a real backend health problem. Report a
-                    # FAILURE so the grid requeues to a healthy worker + strikes us,
-                    # then take ourselves offline until the backend recovers.
-                    await self._fail_job(job_id, f"backend returned HTTP {response.status_code}")
-                    raise BackendUnavailable(f"backend HTTP {response.status_code}")
+                await self._check_backend_response(response)
 
                 async for line in response.aiter_lines():
-                    if cancel_event.is_set():
-                        # Client cancelled — stop pulling tokens. Leaving the
-                        # `async with` closes the connection to the backend, which
-                        # aborts the running request and frees the GPU.
-                        cancelled = True
-                        break
                     if not line.startswith("data: "):
                         continue
                     data_str = line[6:]
@@ -869,6 +895,11 @@ class StreamingWorker:
                         token_message["logprobs"] = logprobs
                     await self.ws.send(json.dumps(token_message))
 
+        try:
+            cancelled = await self._run_backend_operation(job_id, generate())
+        except _BackendHTTPError as error:
+            await self._report_backend_http_error(job_id, error)
+            return
         except httpx.ReadTimeout:
             await self._generation_timeout(job_id, start_time)
             return
@@ -876,14 +907,6 @@ class StreamingWorker:
             logger.error(f"Backend unreachable mid-generation: {e}")
             await self._fail_job(job_id, f"backend unreachable: {type(e).__name__}")
             raise BackendUnavailable(str(e)) from e
-        finally:
-            # Stop the cancel watcher BEFORE the ack recv() below so it can't steal
-            # the ack frame.
-            watcher.cancel()
-            try:
-                await watcher
-            except asyncio.CancelledError:
-                pass
 
         # A 200 that yielded zero deltas is a silent backend failure (crashed on
         # load, empty stream). Report it as a failure so the grid retries on a
@@ -916,7 +939,8 @@ class StreamingWorker:
 
         # Wait for ack with den reward
         try:
-            ack = json.loads(await asyncio.wait_for(self.ws.recv(), timeout=10))
+            async with asyncio.timeout(10):
+                ack = json.loads(await self.ws.recv())
             den = ack.get("den", 0)
             self._jobs_completed += 1
             self._total_den += den
@@ -952,31 +976,16 @@ class StreamingWorker:
 
         logger.info(f"📥 Raw job {job_id[:8]} | format={api_format} | stream={stream}")
 
-        cancelled = False
-        cancel_event = asyncio.Event()
-        watcher = self._start_cancel_watcher(job_id, cancel_event)
-        try:
+        full_json = None
+
+        async def generate() -> None:
+            nonlocal usage, full_json
             if stream:
                 cur_event = None
                 async with self.backend.stream("POST", url, json=request, headers=headers) as resp:
-                    if resp.status_code != 200:
-                        body = await resp.aread()
-                        detail = body.decode("utf-8", "replace")[:500]
-                        if 400 <= resp.status_code < 500:
-                            await self._fail_job(
-                                job_id, f"backend rejected request (HTTP {resp.status_code}): {detail}",
-                                client_error=True,
-                            )
-                            return
-                        await self._fail_job(job_id, f"backend returned HTTP {resp.status_code}")
-                        raise BackendUnavailable(f"backend HTTP {resp.status_code}")
+                    await self._check_backend_response(resp)
 
                     async for line in resp.aiter_lines():
-                        if cancel_event.is_set():
-                            # Client cancelled — closing the stream aborts the
-                            # backend request and frees the GPU.
-                            cancelled = True
-                            break
                         if not line:
                             continue
                         if line.startswith("event:"):
@@ -993,26 +1002,17 @@ class StreamingWorker:
                                 {"type": "raw", "id": job_id, "event": cur_event, "data": data}
                             ))
                             cur_event = None
-                done_raw = {"type": "done", "id": job_id, "usage": usage}
-                if cancelled:
-                    done_raw["cancelled"] = True
-                await self.ws.send(json.dumps(done_raw))
             else:
                 resp = await self.backend.post(url, json=request, headers=headers)
-                if resp.status_code != 200:
-                    detail = resp.text[:500]
-                    if 400 <= resp.status_code < 500:
-                        await self._fail_job(
-                            job_id, f"backend rejected request (HTTP {resp.status_code}): {detail}",
-                            client_error=True,
-                        )
-                        return
-                    await self._fail_job(job_id, f"backend returned HTTP {resp.status_code}")
-                    raise BackendUnavailable(f"backend HTTP {resp.status_code}")
-                obj = resp.json()
-                usage = _extract_usage(obj)
-                await self.ws.send(json.dumps({"type": "done", "id": job_id, "full_json": obj, "usage": usage}))
+                await self._check_backend_response(resp)
+                full_json = resp.json()
+                usage = _extract_usage(full_json)
 
+        try:
+            cancelled = await self._run_backend_operation(job_id, generate())
+        except _BackendHTTPError as error:
+            await self._report_backend_http_error(job_id, error)
+            return
         except httpx.ReadTimeout:
             await self._generation_timeout(job_id, start_time)
             return
@@ -1020,17 +1020,18 @@ class StreamingWorker:
             logger.error(f"Backend unreachable mid-raw-generation: {e}")
             await self._fail_job(job_id, f"backend unreachable: {type(e).__name__}")
             raise BackendUnavailable(str(e)) from e
-        finally:
-            # Stop the cancel watcher before the ack recv() so it can't steal it.
-            watcher.cancel()
-            try:
-                await watcher
-            except asyncio.CancelledError:
-                pass
+
+        done_raw = {"type": "done", "id": job_id, "usage": usage}
+        if full_json is not None:
+            done_raw["full_json"] = full_json
+        if cancelled:
+            done_raw["cancelled"] = True
+        await self.ws.send(json.dumps(done_raw))
 
         # Wait for the den ack.
         try:
-            ack = json.loads(await asyncio.wait_for(self.ws.recv(), timeout=10))
+            async with asyncio.timeout(10):
+                ack = json.loads(await self.ws.recv())
             den = ack.get("den", 0)
             self._jobs_completed += 1
             self._total_den += den
