@@ -67,8 +67,8 @@ async def start_enrollment(
         pending.unlink(missing_ok=True)
     if pending.exists():
         state = _load_pending(pending)
-        _require_pending_matches(state, grid_api_url=base, worker_name=name)
         if int(state["expires_at"]) > int(time.time()):
+            _require_pending_matches(state, grid_api_url=base, worker_name=name)
             return _public_state(state)
         pending.unlink()
 

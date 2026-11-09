@@ -32,6 +32,16 @@ does not currently prove a live backend-to-Grid job lifecycle.
   subprocess only; not a live vLLM or systemd test.
 - `test_enrollment.py` - Console device enrollment, private pending-state
   persistence, delegation verification, and capability-bound registration.
+- `test_operator_reliability.py` - generation read-timeout classification across
+  all three protocols, health-dependent availability, timeout bounds/reload,
+  loaded Ollama context/caps/fallback and expired-name enrollment recovery.
+  It also checks the exact patched CA/packaging pins in the universal lock.
+  These are mocked protocol tests, not native slow-GPU qualification.
+- `test_job_lifecycle.py` - the real WebSocket cancel watcher and HTTPX mock
+  transport: back-to-back jobs, terminal-reader ownership, pre-header/silent/
+  partial cancellation, observed usage preservation, mismatched cancel IDs,
+  HTTP failures, reader loss, worker shutdown and ack-completion races. These
+  are in-memory protocol fixtures, not native Core/GPU qualification.
 - `test_roster_regressions.py` - isolated settings persistence, exact-name
   enrollment, schedule inheritance/overrides, cold config reload, capability
   preservation, endpoint-bound secret retention, and detected-context caps.
@@ -46,8 +56,8 @@ does not currently prove a live backend-to-Grid job lifecycle.
 ## Local Contracts
 
 - Keep unit tests deterministic and free of live Grid/API credentials.
-- Do not treat this smoke suite as proof of WebSocket reconnect, streaming,
-  cancellation, max-token enforcement, payout identity, or service install.
+- Do not treat in-memory protocol tests as live backend-to-Grid qualification
+  of reconnect, streaming, cancellation, token enforcement, payouts or install.
 - Add regression tests beside any pure behavior changed in
   `inference_worker/`.
 

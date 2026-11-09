@@ -1,17 +1,17 @@
-version: '3.8'
 services:
   grid-inference-worker:
     build: .
     container_name: grid-inference-worker
     restart: unless-stopped
+    command: ["grid-inference-worker", "--host", "0.0.0.0"]
     env_file:
       - .env
     ports:
-      - "7861:7861"
+      - "127.0.0.1:7861:7861"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:7861/api/status')"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:7861/login', follow_redirects=False).raise_for_status()"]
       interval: 30s
       timeout: 10s
       retries: 3

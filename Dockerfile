@@ -30,6 +30,6 @@ USER app
 EXPOSE 7861
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:7861/api/status')"
+    CMD python -c "import httpx; httpx.get('http://localhost:7861/login', follow_redirects=False).raise_for_status()"
 
 CMD ["grid-inference-worker"]

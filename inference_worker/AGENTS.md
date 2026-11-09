@@ -57,8 +57,33 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   for unloaded models are not runtime capacity. When a catalog key addresses
   multiple instances, use their smallest context; missing instance context
   leaves detection unknown and preserves the conservative fallback.
+- Ollama context detection reads `/api/ps` for the loaded model after preflight,
+  never `/api/show`'s architecture limit. Unknown loaded context falls back to
+  at most 4,096; an operator cap can only reduce it. This is metadata-based
+  admission, not proof of long-context accuracy or prefill latency.
+- Generation waits use bounded `GRID_BACKEND_READ_TIMEOUT` (default 600s,
+  range 10-3600) separately from the 10s connect timeout and 5s health probe.
+  A read timeout fails the job but only marks the backend unavailable when its
+  health probe also fails. Core/client deadlines and retry/accounting policy
+  are unchanged. Restart the worker to apply edited timeout settings.
+- Each job's backend operation and WebSocket cancel reader are owned and awaited
+  together. Stop the reader and finish backend cleanup before sending any
+  terminal result, including HTTP rejections and timeouts; Core may dispatch the
+  next job immediately. A received matching cancel aborts pending HTTP work
+  before headers or during silent reads and preserves only observed partial
+  output/usage. Worker shutdown propagates cancellation, not a fabricated result.
+  This does not guarantee how quickly Core forwards a client's cancellation.
+- Unexpected assignments during active work or reader loss fail the connection
+  so Core can recover its claim. Acks use task-local timeout scopes so Python
+  3.11 shutdown cannot be swallowed by an ack-completion race.
+- An expired pending Console enrollment may be replaced for a new worker name;
+  an unexpired enrollment still requires exact API/name matching or explicit
+  restart. Never alter the stored signer to recover a pending request.
 - `eth-account` is a required runtime dependency. Every shipped worker signs
   result receipts; release binaries must pass `--verify-runtime` before staging.
+- Runtime CA roots and packaging dependencies retain the patched certifi,
+  Pillow and setuptools floors. Build macOS ARM64 on the supported macOS15
+  runner; the retired macOS14 runner is not a release gate workaround.
 - Secure Console enrollment is the default for a single backend with one
   connection. It binds the API key, delegation, worker signer, and exact worker
   name. Multi-backend or parallel operators use the explicit advanced account

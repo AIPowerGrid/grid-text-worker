@@ -33,6 +33,7 @@ _PERSISTED_BACKEND_SETTINGS = frozenset(
         "GRID_BACKENDS",
         "GRID_MAX_CONTEXT_LENGTH",
         "GRID_MAX_LENGTH",
+        "GRID_BACKEND_READ_TIMEOUT",
         "GRID_MAX_THREADS",
         "GRID_MODEL_NAME",
         "GRID_NSFW",
@@ -148,7 +149,10 @@ def _validated_backend_settings(value: object) -> dict:
         ("GRID_MAX_THREADS", 1, 16),
         ("GRID_MAX_LENGTH", 64, 32768),
         ("GRID_MAX_CONTEXT_LENGTH", 256, 1048576),
+        ("GRID_BACKEND_READ_TIMEOUT", 10, 3600),
     ):
+        if key == "GRID_BACKEND_READ_TIMEOUT" and key in form and not form[key]:
+            raise SettingsValidationError(f"{key} must be an integer")
         if key not in form or not form[key]:
             continue
         try:
@@ -706,6 +710,7 @@ async def settings_page(request: Request):
             "GRID_SCHEDULE": Settings.GRID_SCHEDULE,
             "GRID_MAX_LENGTH": str(Settings.MAX_LENGTH),
             "GRID_MAX_CONTEXT_LENGTH": str(Settings.MAX_CONTEXT_LENGTH),
+            "GRID_BACKEND_READ_TIMEOUT": str(Settings.BACKEND_READ_TIMEOUT),
         },
     })
 

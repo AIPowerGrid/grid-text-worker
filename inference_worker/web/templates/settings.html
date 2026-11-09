@@ -89,9 +89,12 @@
               <div class="model-card-ctx">
                 <span class="model-card-ctx-label">Context</span>
                 <input type="range" class="model-card-slider" min="2048" :max="ctxMax(b)" step="1024"
-                       x-model.number="b.max_context">
+                       :value="b.max_context || b.window || 2048" @input="b.max_context = Number($event.target.value)">
                 <span class="model-card-ctx-value"
-                      x-text="Number(b.max_context || 0).toLocaleString() + ' ctx'"></span>
+                      :title="b.window ? 'Detected context: ' + Number(b.window).toLocaleString() : 'Loaded context unavailable'"
+                      x-text="contextLabel(b)"></span>
+                <button type="button" class="btn btn-sm btn-outline" x-show="b.max_context"
+                        @click="b.max_context = 0" title="Reset context cap to automatic">Reset</button>
               </div>
               <div class="model-backend-fields">
                 <label class="field"><span class="field-label">Engine</span>
@@ -199,6 +202,11 @@
         <input type="checkbox" :checked="form.GRID_NSFW === 'true'" @change="form.GRID_NSFW = $event.target.checked ? 'true' : 'false'">
         Allow NSFW
       </label>
+      <label class="field">
+        <span class="field-label">Backend read timeout (seconds)</span>
+        <input type="number" min="10" max="3600" step="1" required
+               x-model.number="form.GRID_BACKEND_READ_TIMEOUT">
+      </label>
     </div>
 
     <div class="card">
@@ -263,6 +271,7 @@ function settingsForm() {
       GRID_SCHEDULE: {{ settings.GRID_SCHEDULE | tojson }},
       GRID_MAX_LENGTH: {{ settings.GRID_MAX_LENGTH | tojson }},
       GRID_MAX_CONTEXT_LENGTH: {{ settings.GRID_MAX_CONTEXT_LENGTH | tojson }},
+      GRID_BACKEND_READ_TIMEOUT: {{ settings.GRID_BACKEND_READ_TIMEOUT | tojson }},
     },
     init() {
       this.hydrateSchedule();
@@ -273,6 +282,10 @@ function settingsForm() {
       // The model's detected window is the honest ceiling; before detection
       // lands, don't offer more than the current value.
       return b.window || Math.max(Number(b.max_context) || 2048, 2048);
+    },
+
+    contextLabel(b) {
+      return Number(b.max_context) > 0 ? Number(b.max_context).toLocaleString() + ' ctx' : 'Auto';
     },
 
     async loadBackends() {

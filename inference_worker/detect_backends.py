@@ -613,15 +613,21 @@ async def get_model_context_length(url: str, engine: str = None, model_name: str
     try:
         async with httpx.AsyncClient(timeout=10, headers=headers) as client:
             if engine == "ollama" and model_name:
-                # POST /api/show → model_info.<arch>.context_length
-                resp = await client.post(f"{url}/api/show", json={"name": model_name})
+                # Read the loaded runner, not /api/show's architectural maximum.
+                # Registration probes the model before reaching this detection.
+                resp = await client.get(f"{url}/api/ps")
                 if resp.status_code == 200:
                     data = resp.json()
-                    model_info = data.get("model_info", {})
-                    for key, val in model_info.items():
-                        if key.endswith(".context_length"):
-                            ctx = int(val)
-                            break
+                    matches = [
+                        m for m in data.get("models", []) if isinstance(m, dict)
+                        and model_name.removesuffix(":latest") in {
+                            str(m.get("name", "")).removesuffix(":latest"),
+                            str(m.get("model", "")).removesuffix(":latest"),
+                        }
+                    ]
+                    contexts = [m.get("context_length") for m in matches]
+                    if contexts and all(type(c) is int and c > 0 for c in contexts):
+                        ctx = min(contexts)
 
             elif engine == "tgi":
                 resp = await client.get(f"{url}/info")
