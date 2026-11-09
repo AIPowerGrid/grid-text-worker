@@ -71,6 +71,9 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   restart. Never alter the stored signer to recover a pending request.
 - `eth-account` is a required runtime dependency. Every shipped worker signs
   result receipts; release binaries must pass `--verify-runtime` before staging.
+- Runtime CA roots and packaging dependencies retain the patched certifi,
+  Pillow and setuptools floors. Build macOS ARM64 on the supported macOS15
+  runner; the retired macOS14 runner is not a release gate workaround.
 - Secure Console enrollment is the default for a single backend with one
   connection. It binds the API key, delegation, worker signer, and exact worker
   name. Multi-backend or parallel operators use the explicit advanced account

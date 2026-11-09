@@ -6,6 +6,8 @@
 import asyncio
 import json
 import time
+import tomllib
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,6 +21,15 @@ from inference_worker.config import Settings, backend_read_timeout
 from inference_worker.detect_backends import get_model_context_length
 from inference_worker.env_utils import reload_settings
 from inference_worker.web.routes import SettingsValidationError, _validated_backend_settings
+
+
+def test_locked_security_dependencies_remain_patched():
+    root = Path(__file__).resolve().parents[1]
+    lock = tomllib.loads((root / "uv.lock").read_text())
+    versions = {p["name"]: p["version"] for p in lock["package"]}
+    assert versions["certifi"] == "2026.10.19"
+    assert versions["pillow"] == "13.0.0"
+    assert versions["setuptools"] == "84.1.0"
 
 
 @pytest.fixture

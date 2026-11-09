@@ -35,6 +35,7 @@ does not currently prove a live backend-to-Grid job lifecycle.
 - `test_operator_reliability.py` - generation read-timeout classification across
   all three protocols, health-dependent availability, timeout bounds/reload,
   loaded Ollama context/caps/fallback and expired-name enrollment recovery.
+  It also checks the exact patched CA/packaging pins in the universal lock.
   These are mocked protocol tests, not native slow-GPU qualification.
 - `test_roster_regressions.py` - isolated settings persistence, exact-name
   enrollment, schedule inheritance/overrides, cold config reload, capability
