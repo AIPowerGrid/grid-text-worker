@@ -326,6 +326,15 @@ function settingsInstance(fetch = async () => response({ok: true})) {
   return instantiate(settings.replace(/{{[\s\S]*?}}/g, '""'), 'settingsForm', fetch);
 }
 
+test('automatic context is not displayed as zero and has a reset command', () => {
+  const app = settingsInstance();
+  assert.equal(app.contextLabel({max_context: 0, window: 40960}), 'Auto');
+  assert.equal(app.contextLabel({}), 'Auto');
+  assert.equal(app.contextLabel({max_context: 8192}), Number(8192).toLocaleString() + ' ctx');
+  assert.ok(settings.includes('@click="b.max_context = 0"'));
+  assert.ok(settings.includes('form.GRID_BACKEND_READ_TIMEOUT'));
+});
+
 test('empty day selection produces an explicit all-week pause in both editors', () => {
   const wizard = instantiate(setup, 'setupWizard', async () => response({}));
   const editor = settingsInstance();

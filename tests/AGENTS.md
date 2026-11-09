@@ -32,6 +32,10 @@ does not currently prove a live backend-to-Grid job lifecycle.
   subprocess only; not a live vLLM or systemd test.
 - `test_enrollment.py` - Console device enrollment, private pending-state
   persistence, delegation verification, and capability-bound registration.
+- `test_operator_reliability.py` - generation read-timeout classification across
+  all three protocols, health-dependent availability, timeout bounds/reload,
+  loaded Ollama context/caps/fallback and expired-name enrollment recovery.
+  These are mocked protocol tests, not native slow-GPU qualification.
 - `test_roster_regressions.py` - isolated settings persistence, exact-name
   enrollment, schedule inheritance/overrides, cold config reload, capability
   preservation, endpoint-bound secret retention, and detected-context caps.

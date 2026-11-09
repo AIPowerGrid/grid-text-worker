@@ -60,6 +60,17 @@ def default_worker_name() -> str:
     return f"Text-Inference-Worker-{sid}"
 
 
+def backend_read_timeout(value: str) -> int:
+    """Keep generation waits finite without confusing them with connect timeouts."""
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("GRID_BACKEND_READ_TIMEOUT must be an integer from 10 to 3600") from exc
+    if not 10 <= seconds <= 3600:
+        raise ValueError("GRID_BACKEND_READ_TIMEOUT must be an integer from 10 to 3600")
+    return seconds
+
+
 class Settings:
     GRID_API_KEY = os.getenv("GRID_API_KEY", "")
     # Set only by the Console device-enrollment flow. It binds the worker-only
@@ -84,6 +95,7 @@ class Settings:
     # generations and starve multi-step tool calls.
     MAX_LENGTH = int(os.getenv("GRID_MAX_LENGTH", "32768"))
     MAX_CONTEXT_LENGTH = int(os.getenv("GRID_MAX_CONTEXT_LENGTH", "131072"))
+    BACKEND_READ_TIMEOUT = backend_read_timeout(os.getenv("GRID_BACKEND_READ_TIMEOUT", "600"))
 
     # Backend type: "ollama" (easy mode) or "openai" (advanced/custom)
     BACKEND_TYPE = os.getenv("BACKEND_TYPE", "ollama")

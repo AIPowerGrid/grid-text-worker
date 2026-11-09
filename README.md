@@ -191,6 +191,7 @@ Copy `.env.example` to `.env` and fill in your values, or configure through the 
 | `OPENAI_API_KEY` | | API key for OpenAI-compatible backend |
 | `GRID_WORKER_NAME` | `Text-Inference-Worker` | Worker name on the grid |
 | `GRID_MAX_LENGTH` | `32768` | Fallback output-token budget when the request omits one |
+| `GRID_BACKEND_READ_TIMEOUT` | `600` | Maximum seconds without backend response bytes, including prefill (10-3600); connect timeout stays 10s. Client/Core deadlines still apply. Editable in Settings; restart worker to apply. |
 | `GRID_MAX_CONTEXT_LENGTH` | `131072` | Maximum advertised context window (auto-detected when possible) |
 | `GRID_NSFW` | `true` | Accept NSFW jobs |
 | `WALLET_ADDRESS` | | Legacy local value; does not control Grid payouts |
@@ -221,6 +222,22 @@ docker compose up -d
 The dashboard is available at `http://localhost:7861` and binds to loopback by
 default. Use `--host 0.0.0.0` only when you deliberately need LAN access; the
 generated dashboard token is still required.
+
+Compose binds the app to all interfaces **inside the container**, but publishes
+only `127.0.0.1:7861` on the host. Its healthcheck checks the public login page
+and rejects HTTP errors; it proves the dashboard responds, not Grid acceptance.
+For an Ollama running on the host, set `OLLAMA_URL=http://host.docker.internal:11434`
+and enter that endpoint explicitly in setup if automatic detection finds only
+container loopback. Keep Ollama's own listener/firewall restricted appropriately.
+Before recreating an existing container, preserve its worker configuration and
+signing identity; this Compose change does not migrate container-local state.
+
+Ollama's loaded context may be much smaller than the model's architectural
+maximum. The updated source reads `/api/ps` after preflight; older servers
+without loaded-context metadata fall back to at most 4,096 tokens. Set
+`OLLAMA_CONTEXT_LENGTH` in the **Ollama service**, restart/reload its model, and
+then restart the worker to redetect. A worker context cap cannot enlarge the
+backend's actual context or prove that prefill fits within request deadlines.
 
 ## Install as a Service
 

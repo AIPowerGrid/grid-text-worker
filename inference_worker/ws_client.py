@@ -127,7 +127,9 @@ class StreamingWorker:
         self.name: str = name or spec.name
         self.model_name: str = spec.model_name
         self.grid_model_name: str = spec.grid_model_name or self._build_grid_model_name()
-        self.backend = httpx.AsyncClient(timeout=120)
+        self.backend = httpx.AsyncClient(timeout=httpx.Timeout(
+            connect=10, read=Settings.BACKEND_READ_TIMEOUT, write=30, pool=10,
+        ))
         self.ws = None
         self.worker_id = None
         self.connected = False
@@ -317,7 +319,10 @@ class StreamingWorker:
                 return int(ctx)
         except Exception as e:
             logger.debug(f"context detection failed: {e}")
-        return min(Settings.MAX_CONTEXT_LENGTH, 8192)
+        # Ollama's architecture maximum is not the loaded runner's context.
+        # Older servers without /api/ps context metadata must stay conservative.
+        fallback = 4096 if self.spec.backend_type == "ollama" else 8192
+        return min(Settings.MAX_CONTEXT_LENGTH, fallback)
 
     async def _backend_healthy(self) -> bool:
         """True iff the local inference backend answers and serves our model.
@@ -560,6 +565,18 @@ class StreamingWorker:
             }))
         except Exception:
             pass  # WS may already be gone; the grid's disconnect path requeues anyway
+
+    async def _generation_timeout(self, job_id: str, start_time: float) -> None:
+        elapsed = max(0.0, time.time() - start_time)
+        logger.warning(
+            "Backend ReadTimeout for job %s after %.1fs (read limit %ss)",
+            job_id[:8], elapsed, Settings.BACKEND_READ_TIMEOUT,
+        )
+        await self._fail_job(job_id, "backend generation timed out (ReadTimeout)")
+        # Slow prefill does not by itself mean the engine has gone offline.
+        # The failed job is still reported; Core retains retry/accounting policy.
+        if not await self._backend_healthy():
+            raise BackendUnavailable("backend unhealthy after ReadTimeout")
 
     async def _detect_vision(self) -> bool:
         """Return True if this backend's model accepts image input.
@@ -852,7 +869,10 @@ class StreamingWorker:
                         token_message["logprobs"] = logprobs
                     await self.ws.send(json.dumps(token_message))
 
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+        except httpx.ReadTimeout:
+            await self._generation_timeout(job_id, start_time)
+            return
+        except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
             logger.error(f"Backend unreachable mid-generation: {e}")
             await self._fail_job(job_id, f"backend unreachable: {type(e).__name__}")
             raise BackendUnavailable(str(e)) from e
@@ -993,7 +1013,10 @@ class StreamingWorker:
                 usage = _extract_usage(obj)
                 await self.ws.send(json.dumps({"type": "done", "id": job_id, "full_json": obj, "usage": usage}))
 
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+        except httpx.ReadTimeout:
+            await self._generation_timeout(job_id, start_time)
+            return
+        except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
             logger.error(f"Backend unreachable mid-raw-generation: {e}")
             await self._fail_job(job_id, f"backend unreachable: {type(e).__name__}")
             raise BackendUnavailable(str(e)) from e

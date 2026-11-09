@@ -57,6 +57,18 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   for unloaded models are not runtime capacity. When a catalog key addresses
   multiple instances, use their smallest context; missing instance context
   leaves detection unknown and preserves the conservative fallback.
+- Ollama context detection reads `/api/ps` for the loaded model after preflight,
+  never `/api/show`'s architecture limit. Unknown loaded context falls back to
+  at most 4,096; an operator cap can only reduce it. This is metadata-based
+  admission, not proof of long-context accuracy or prefill latency.
+- Generation waits use bounded `GRID_BACKEND_READ_TIMEOUT` (default 600s,
+  range 10-3600) separately from the 10s connect timeout and 5s health probe.
+  A read timeout fails the job but only marks the backend unavailable when its
+  health probe also fails. Core/client deadlines and retry/accounting policy
+  are unchanged. Restart the worker to apply edited timeout settings.
+- An expired pending Console enrollment may be replaced for a new worker name;
+  an unexpired enrollment still requires exact API/name matching or explicit
+  restart. Never alter the stored signer to recover a pending request.
 - `eth-account` is a required runtime dependency. Every shipped worker signs
   result receipts; release binaries must pass `--verify-runtime` before staging.
 - Secure Console enrollment is the default for a single backend with one

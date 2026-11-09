@@ -3,7 +3,7 @@
 import os
 import sys
 
-from .config import ENV_FILE, Settings
+from .config import ENV_FILE, Settings, backend_read_timeout
 
 ENV_PATH = ENV_FILE
 
@@ -73,6 +73,8 @@ def reload_settings(config: dict):
         Settings.MAX_LENGTH = int(config["GRID_MAX_LENGTH"])
     if "GRID_MAX_CONTEXT_LENGTH" in config:
         Settings.MAX_CONTEXT_LENGTH = int(config["GRID_MAX_CONTEXT_LENGTH"])
+    if "GRID_BACKEND_READ_TIMEOUT" in config:
+        Settings.BACKEND_READ_TIMEOUT = backend_read_timeout(config["GRID_BACKEND_READ_TIMEOUT"])
 
 
 def is_configured() -> bool:

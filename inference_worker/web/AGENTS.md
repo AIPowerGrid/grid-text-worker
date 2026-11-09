@@ -53,6 +53,12 @@ settings, worker start/stop/restart). FastAPI app that owns and supervises the w
 - **Don't run blocking detection in request handlers** — `/setup` renders instantly and the
   page calls `POST /api/setup/detect`; wrap blocking probes in `asyncio.to_thread`.
 - Persist config only via `env_utils.write_env` + `reload_settings`; `Settings` is the single source.
+- Settings exposes the bounded backend read timeout; validation, in-memory
+  reload and restart must agree on the same seconds value. It is not a client
+  deadline, total job duration limit or permission to wait forever.
+- Per-backend zero context cap is displayed as Auto, with detected capacity in
+  the tooltip and an explicit reset after a manual cap. Moving the slider sets
+  a real cap; merely rendering Settings must not convert Auto to a number.
 - Setup and Settings accept only their explicit backend-field allowlist. Keep
   values bounded and canonicalized before writing `.env`; the local manager is
   not a general environment-variable editor.
