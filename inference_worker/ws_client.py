@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 import websockets
 
-from . import vision_probe
+from . import result_commitment, vision_probe
 from .config import Settings
 from .worker_identity import (
     WorkerIdentityError,
@@ -194,26 +194,27 @@ class StreamingWorker:
             "uptime_seconds": uptime,
         }
 
-    def _sign_receipt(self, job_id: str, full_text: str):
-        """Sign sha256(result) with the worker's identity key (EIP-191).
+    def _sign_receipt(self, job_id: str, full_text: str, full_reasoning: str = "",
+                      tool_calls: list | None = None) -> str | None:
+        """Sign Core's output commitment for this job with the worker key (EIP-191).
 
-        Proves 'this worker produced this result for this job' — the grid stores
-        the sig in the ledger for cryptographic attribution / future slashing.
-        Returns None if no signer (eth-account absent) so the job still settles."""
+        Core recomputes the same commitment from the stream it witnessed and
+        stores the signature in the ledger only if it verifies, so the message
+        must match `result_commitment` exactly. Returns None when there is no
+        signer or nothing to commit to; the job still settles, unsigned."""
         if not self._signer:
             return None
         try:
-            import hashlib
-
             from eth_account.messages import encode_defunct
-            result_hash = hashlib.sha256((full_text or "").encode()).hexdigest()
+
+            commitment = result_commitment.result_hash(full_text or "", full_reasoning or "", tool_calls)
+            if not commitment:
+                return None
             signed = self._signer.sign_message(
-                encode_defunct(text=f"aipg-receipt:v1:{job_id}:{result_hash}")
+                encode_defunct(text=result_commitment.signed_message(str(job_id), commitment))
             )
             sig = signed.signature.hex()
-            if not sig.startswith("0x"):
-                sig = "0x" + sig
-            return {"signer": self.signer_address, "sig": sig, "result_sha256": result_hash}
+            return sig if sig.startswith("0x") else "0x" + sig
         except Exception as e:
             logger.warning(f"receipt sign failed for {job_id}: {e}")
             return None
@@ -827,6 +828,7 @@ class StreamingWorker:
 
         full_text = ""
         full_reasoning = ""
+        tool_acc: dict = {}  # merged tool calls, mirrored from what Core accumulates
         token_count = 0
         usage = None
         last_finish = None
@@ -883,6 +885,8 @@ class StreamingWorker:
                         full_text += delta["content"]
                     if delta.get("reasoning_content"):
                         full_reasoning += delta["reasoning_content"]
+                    if delta.get("tool_calls"):
+                        result_commitment.merge_tool_call_deltas(tool_acc, delta["tool_calls"])
 
                     token_count += 1
                     token_message = {
@@ -932,9 +936,11 @@ class StreamingWorker:
             done_msg["cancelled"] = True
         if usage:
             done_msg["usage"] = usage
-        receipt = self._sign_receipt(job_id, full_text)
-        if receipt:
-            done_msg["receipt"] = receipt  # cryptographic attribution of this result
+        worker_sig = self._sign_receipt(
+            job_id, full_text, full_reasoning, result_commitment.merged_tool_calls(tool_acc)
+        )
+        if worker_sig:
+            done_msg["worker_sig"] = worker_sig  # verified and stored by Core at settlement
         await self.ws.send(json.dumps(done_msg))
 
         # Wait for ack with den reward
