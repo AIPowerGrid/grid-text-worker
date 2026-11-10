@@ -19,6 +19,8 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
     frames relay backend-returned logprobs without synthesizing them. Core must
     treat the field as untrusted and bounded validator evidence.
   - `p2p_client.py` — experimental libp2p/gossipsub transport (`P2P_ENABLED`, runs trio).
+- **Result commitment:** `result_commitment.py` — the output hash and signed
+  message exactly as Grid Core computes them.
 - **Backend bridge:** `prompts.py` owns shared local-backend prompts and response
   cleanup. `detect_backends.py` owns port scans, model/context probes, and
   Ollama installation.
@@ -81,6 +83,15 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   restart. Never alter the stored signer to recover a pending request.
 - `eth-account` is a required runtime dependency. Every shipped worker signs
   result receipts; release binaries must pass `--verify-runtime` before staging.
+- The result signature follows Core's contract, not a worker-local format:
+  `worker_sig` in the `done` frame is an EIP-191 signature over
+  `aipg-job:{job_id}:{result_hash}`. `result_commitment.py` mirrors Core's
+  `chat_output.result_hash` (plain sha256 of visible text; a canonical JSON
+  envelope once reasoning or tool calls exist) and its tool-call merge. Core
+  recomputes the hash from the token frames it received and stores the
+  signature only if it verifies; a mismatch settles the job unsigned with no
+  error. Change this only together with Core, and keep the pinned vectors.
+  Raw passthrough jobs (`/v1/messages`, `/v1/responses`) are not signed.
 - Runtime CA roots and packaging dependencies retain the patched certifi,
   Pillow and setuptools floors. Build macOS ARM64 on the supported macOS15
   runner; the retired macOS14 runner is not a release gate workaround.
