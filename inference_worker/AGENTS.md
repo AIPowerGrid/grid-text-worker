@@ -19,6 +19,15 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
     frames relay backend-returned logprobs without synthesizing them. Core must
     treat the field as untrusted and bounded validator evidence.
   - `p2p_client.py` — experimental libp2p/gossipsub transport (`P2P_ENABLED`, runs trio).
+- **Tool-call fallback:** `tool_fallback.py` — for backend models named in
+  `GRID_TOOLS_NONSTREAM_MODELS` (comma-separated, off by default), a chat
+  request that carries `tools` is sent with `stream: false` and the complete
+  answer is replayed as stream lines to the unchanged job loop. It exists for
+  model servers whose streaming parser drops tool calls (vLLM 0.10.2 with
+  gpt-oss). An echoed copy of the call's arguments in `content` is dropped.
+  The caller sees no tokens until the answer is complete. Do not enable it for
+  a backend that streams tool calls correctly, and remove it once the server
+  is fixed.
 - **Result commitment:** `result_commitment.py` — the output hash and signed
   message exactly as Grid Core computes them.
 - **Backend bridge:** `prompts.py` owns shared local-backend prompts and response

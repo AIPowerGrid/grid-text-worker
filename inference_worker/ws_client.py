@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 import websockets
 
-from . import result_commitment, vision_probe
+from . import result_commitment, tool_fallback, vision_probe
 from .config import Settings
 from .worker_identity import (
     WorkerIdentityError,
@@ -837,7 +837,14 @@ class StreamingWorker:
         async def generate() -> None:
             nonlocal full_text, full_reasoning, token_count, usage, last_finish
             # Stream from the inference engine → relay deltas to the grid.
-            async with self.backend.stream("POST", url, json=openai_payload, headers=headers) as response:
+            # A backend whose streaming parser drops tool calls is asked for the
+            # whole answer instead (operator opt-in; see tool_fallback).
+            source = (
+                tool_fallback.CompleteAsStream(self.backend, url, openai_payload, headers)
+                if tool_fallback.applies(self.model_name, openai_payload)
+                else self.backend.stream("POST", url, json=openai_payload, headers=headers)
+            )
+            async with source as response:
                 await self._check_backend_response(response)
 
                 async for line in response.aiter_lines():
