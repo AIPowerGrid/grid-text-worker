@@ -24,6 +24,10 @@ does not currently prove a live backend-to-Grid job lifecycle.
 - `test_linux_installer.py` - mocked-host Linux install, checksum-tamper
   rejection, executable permissions, and proof that installation never starts
   the worker.
+- `test_tool_fallback.py` - opt-in complete-answer path for tool requests:
+  which requests it applies to, the replayed stream shape, dropped echoed
+  arguments, unchanged streaming for everything else, and a backend rejection
+  failing only that job. Mock HTTP; not a live model-server proof.
 - `test_worker_status.py` - mocked ready/rejected registration, disconnect and
   supervisor cleanup, multi-backend status, credential-safe reporting, and
   preservation of validator protocol fields in structured backend requests.
