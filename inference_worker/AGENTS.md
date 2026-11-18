@@ -92,6 +92,23 @@ launcher (CLI/GUI), backend detection, config, and cross-platform service instal
   signature only if it verifies; a mismatch settles the job unsigned with no
   error. Change this only together with Core, and keep the pinned vectors.
   Raw passthrough jobs (`/v1/messages`, `/v1/responses`) are not signed.
+- Embeddings are for backends that are not chat models. The format probe
+  asks for them only after the `openai-chat` probe was plainly refused
+  (HTTP 4xx); a chat backend is never asked and starts as before. A chat probe
+  that timed out or hit a 5xx proves nothing and still means "not registering".
+  `openai-embeddings` needs a 200 with a non-empty vector of numbers from the
+  backend's `/embeddings`, and on Ollama also `embedding` among the model's
+  `/api/show` capabilities. Such a backend registers with that format
+  alone. Its jobs are raw passthrough, never streamed
+  (`stream` is removed), unsigned like the other raw jobs, and the backend
+  body is returned as is. On Ollama the job goes to the native `/api/embed`
+  with `truncate: false` and the answer is reshaped to the OpenAI form:
+  Ollama's `/v1/embeddings` cuts an input longer than the model's context
+  off silently, and the client would pay for text the model never read. An
+  over-long input is then a backend 400, reported as a client error. Other
+  engines are forwarded unchanged; whether they refuse or truncate is
+  theirs. Declared modalities still win; without a
+  declaration such a backend is text-only and is not vision-probed.
 - Runtime CA roots and packaging dependencies retain the patched certifi,
   Pillow and setuptools floors. Build macOS ARM64 on the supported macOS15
   runner; the retired macOS14 runner is not a release gate workaround.
