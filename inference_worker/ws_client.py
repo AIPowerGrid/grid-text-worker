@@ -8,10 +8,12 @@ real time as the inference engine generates them.
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import ssl
+import struct
 import time
 from collections.abc import Coroutine
 from datetime import datetime
@@ -37,7 +39,60 @@ FORMAT_SUFFIX = {
     "openai-chat": "chat/completions",
     "openai-responses": "responses",
     "anthropic": "messages",
+    "openai-embeddings": "embeddings",
 }
+
+# A backend must pass the openai-chat probe to register, unless it is an
+# embedding model: that answers /embeddings and generates no text.
+EMBEDDINGS_FORMAT = "openai-embeddings"
+
+
+def _embedding_probe_ok(body) -> bool:
+    """True when an embeddings probe returned one non-empty vector of numbers."""
+    try:
+        vector = body["data"][0]["embedding"]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return (isinstance(vector, list) and bool(vector)
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vector))
+
+
+def _ollama_embed_request(request: dict) -> dict:
+    """An OpenAI embeddings request as the body of Ollama's native /api/embed.
+
+    Ollama's /v1/embeddings cuts an input that is longer than the model's
+    context off without a word and answers 200, so a client would pay for text
+    the model never read. The native endpoint refuses such an input when asked
+    to (`truncate: false`)."""
+    native = {"model": request.get("model"), "input": request.get("input"), "truncate": False}
+    dimensions = request.get("dimensions")
+    if isinstance(dimensions, int) and not isinstance(dimensions, bool):
+        native["dimensions"] = dimensions
+    return native
+
+
+def _openai_embeddings_body(native, as_base64: bool) -> dict:
+    """Ollama's /api/embed answer in the OpenAI embeddings shape.
+
+    Raises ValueError when the answer holds no list of number vectors."""
+    vectors = native.get("embeddings") if isinstance(native, dict) else None
+    if not isinstance(vectors, list) or not vectors:
+        raise ValueError("no embeddings in the backend answer")
+    data = []
+    for index, vector in enumerate(vectors):
+        if not (isinstance(vector, list) and vector
+                and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vector)):
+            raise ValueError("an embedding is not a list of numbers")
+        if as_base64:
+            try:
+                vector = base64.b64encode(struct.pack(f"<{len(vector)}f", *vector)).decode("ascii")
+            except (struct.error, OverflowError) as error:
+                raise ValueError("an embedding does not fit float32") from error
+        data.append({"object": "embedding", "index": index, "embedding": vector})
+    count = native.get("prompt_eval_count")
+    count = count if isinstance(count, int) and not isinstance(count, bool) else 0
+    return {"object": "list", "data": data, "model": native.get("model"),
+            "usage": {"prompt_tokens": count, "total_tokens": count}}
 
 
 # One vision verdict per (engine, URL, model) for the whole process. Every
@@ -259,16 +314,30 @@ class StreamingWorker:
             "openai-responses": {"model": model, "input": "hi", "max_output_tokens": 8},
             "anthropic": {"model": model, "messages": [{"role": "user", "content": "hi"}],
                           "max_tokens": 8},
+            EMBEDDINGS_FORMAT: {"model": model, "input": "hi"},
         }
         formats = []
-        for fmt in ("openai-chat", "openai-responses", "anthropic"):
+        # Embeddings are probed only for a backend that plainly refused chat
+        # (HTTP 4xx): an embedding model. A chat backend is never asked, so it
+        # starts exactly as before and cannot end up
+        # advertising vectors from a chat model. A chat probe that timed out or
+        # hit a 5xx proves nothing and keeps the old outcome: not registering.
+        chat_refused = False
+        for fmt in ("openai-chat", "openai-responses", "anthropic", EMBEDDINGS_FORMAT):
+            if fmt == EMBEDDINGS_FORMAT and not chat_refused:
+                continue
+            if fmt == EMBEDDINGS_FORMAT and not await self._ollama_lists_embedding():
+                logger.info("Backend model is not an embedding model — not probing embeddings")
+                continue
             suffix = FORMAT_SUFFIX[fmt]
             # The first probe may trigger a cold model load; on a multi-model
             # roster two connections probing at once would make one shared
             # backend load several models simultaneously and time BOTH out.
             # _probe_formats() serializes per URL, and openai-chat (always
             # probed first) gets a cold-load-sized timeout.
-            timeout = 120 if fmt == "openai-chat" else 30
+            # An embedding model loads on its own probe (its chat probe is refused
+            # at once), so that probe needs the cold-load timeout too.
+            timeout = 120 if fmt in ("openai-chat", EMBEDDINGS_FORMAT) else 30
             try:
                 r = await self.backend.post(
                     self._endpoint_url(suffix), json=bodies[fmt],
@@ -279,6 +348,8 @@ class StreamingWorker:
                 continue
             if r.status_code != 200:
                 logger.info(f"Backend does NOT serve {fmt} (/{suffix} -> HTTP {r.status_code})")
+                if fmt == "openai-chat" and 400 <= r.status_code < 500:
+                    chat_refused = True
                 continue
             if fmt == "openai-chat":
                 try:
@@ -290,9 +361,38 @@ class StreamingWorker:
                 if not produced:
                     logger.warning("Backend openai-chat probe returned 200 but no output — not advertising")
                     continue
+            if fmt == EMBEDDINGS_FORMAT:
+                try:
+                    produced = _embedding_probe_ok(r.json())
+                except Exception:
+                    produced = False
+                if not produced:
+                    logger.info("Backend embeddings probe returned 200 but no vector — not advertising")
+                    continue
             formats.append(fmt)
             logger.info(f"Backend serves {fmt} via /{suffix} (200)")
         return formats
+
+    async def _ollama_lists_embedding(self) -> bool:
+        """On Ollama, only a model whose capabilities include "embedding" may
+        advertise embeddings: older Ollama answers /v1/embeddings for chat
+        models too. Other engines, and an Ollama without /api/show, pass."""
+        if self.spec.backend_type != "ollama":
+            return True
+        try:
+            r = await self.backend.post(f"{self._ollama_base()}/api/show", json={"model": self.model_name},
+                                        headers=self._get_auth_headers(), timeout=10)
+            if r.status_code != 200:
+                return True
+            capabilities = r.json().get("capabilities")
+        except Exception:
+            return True
+        return "embedding" in capabilities if isinstance(capabilities, list) else True
+
+    def _ollama_base(self) -> str:
+        """The Ollama root URL, without a trailing /v1."""
+        base = self.spec.url.rstrip("/")
+        return base[:-3].rstrip("/") if base.endswith("/v1") else base
 
     def _get_auth_headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -418,7 +518,10 @@ class StreamingWorker:
         # Detect which API formats the backend exposes so the grid can route
         # /v1/messages and /v1/responses to us only if we can actually serve them.
         self.api_formats = await self._probe_formats()
-        if "openai-chat" not in self.api_formats:
+        # An embedding model answers /embeddings and nothing else. It registers
+        # with that format alone, and the grid routes only embeddings to it.
+        embeddings_only = self.api_formats == [EMBEDDINGS_FORMAT]
+        if "openai-chat" not in self.api_formats and not embeddings_only:
             raise BackendUnavailable(
                 f"Backend at {self.spec.url} failed the openai-chat generation "
                 "probe — not registering (would only produce job failures)"
@@ -432,7 +535,11 @@ class StreamingWorker:
         # Auto-detect image input unless the operator declared modalities/vision.
         # Reliable across engines (ollama capabilities + nonce-image probe); see
         # _detect_vision. Declaration always wins.
-        if not self.modalities_declared:
+        if self.modalities_declared:
+            pass
+        elif embeddings_only:
+            self.modalities = ["text"]  # nothing to see images with; skip the vision probe
+        else:
             self.modalities = (
                 ["text", "image"] if await self._detect_vision() else ["text"]
             )
@@ -960,7 +1067,7 @@ class StreamingWorker:
             logger.warning(f"No ack received for job {job_id[:8]}")
 
     async def _handle_raw_job(self, job_id: str, api_format: str, payload: dict):
-        """Forward a raw Anthropic/Responses request to the backend and relay it.
+        """Forward a raw request (Anthropic, Responses, embeddings) to the backend and relay it.
 
         No mutation beyond overriding the model + clamping max tokens: the
         client's request goes to the native backend endpoint and the upstream
@@ -974,7 +1081,12 @@ class StreamingWorker:
         request["model"] = self.model_name
         # Honor the client's output budget as-is (field name differs by API); the
         # backend's own context window is the real ceiling. We don't clamp it down.
+        if api_format == EMBEDDINGS_FORMAT:
+            request.pop("stream", None)  # one JSON body; embeddings are never streamed
         stream = bool(request.get("stream", False))
+        # Ollama embeddings go to the native endpoint, which can refuse an input
+        # longer than the model's context instead of cutting it off silently.
+        native_embed = api_format == EMBEDDINGS_FORMAT and self.spec.backend_type == "ollama"
         url = self._endpoint_url(suffix)
         headers = self._get_auth_headers()
         start_time = time.time()
@@ -1008,6 +1120,12 @@ class StreamingWorker:
                                 {"type": "raw", "id": job_id, "event": cur_event, "data": data}
                             ))
                             cur_event = None
+            elif native_embed:
+                resp = await self.backend.post(
+                    f"{self._ollama_base()}/api/embed", json=_ollama_embed_request(request), headers=headers)
+                await self._check_backend_response(resp)
+                full_json = _openai_embeddings_body(resp.json(), request.get("encoding_format") == "base64")
+                usage = _extract_usage(full_json)
             else:
                 resp = await self.backend.post(url, json=request, headers=headers)
                 await self._check_backend_response(resp)
@@ -1026,6 +1144,11 @@ class StreamingWorker:
             logger.error(f"Backend unreachable mid-raw-generation: {e}")
             await self._fail_job(job_id, f"backend unreachable: {type(e).__name__}")
             raise BackendUnavailable(str(e)) from e
+        except (httpx.HTTPError, ValueError) as e:
+            # A reset mid-body or a 200 that is not JSON: still submit a result.
+            logger.error(f"Backend gave no usable answer for raw job {job_id[:8]}: {type(e).__name__}")
+            await self._fail_job(job_id, f"backend gave no usable answer: {type(e).__name__}")
+            return
 
         done_raw = {"type": "done", "id": job_id, "usage": usage}
         if full_json is not None:
